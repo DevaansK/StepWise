@@ -1,0 +1,6 @@
+{
+  "name": "StepWise - College Administrative Service Automation",
+  "description": "AI-assisted college administrative service discovery, document verification, approval routing, and request tracking system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

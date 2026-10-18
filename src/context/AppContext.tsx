@@ -1,0 +1,723 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import {
+  User,
+  Role,
+  Department,
+  Service,
+  ServiceRequest,
+  RequestHistory,
+  Notification,
+  RequestStatus,
+  UploadedFile,
+} from '../types';
+import {
+  INITIAL_DEPARTMENTS,
+  INITIAL_SERVICES,
+  INITIAL_USERS,
+  INITIAL_REQUESTS,
+  INITIAL_HISTORIES,
+  INITIAL_NOTIFICATIONS,
+} from '../data/mockData';
+
+interface AppContextType {
+  currentUser: User;
+  users: User[];
+  departments: Department[];
+  services: Service[];
+  requests: ServiceRequest[];
+  histories: RequestHistory[];
+  notifications: Notification[];
+  activeTab: string;
+  selectedRequestId: string | null;
+  selectedServiceId: string | null;
+  unreadCount: number;
+  isWalkthroughOpen: boolean;
+
+  // Actions
+  setActiveTab: (tab: string, contextId?: string | null) => void;
+  setSelectedRequestId: (id: string | null) => void;
+  setSelectedServiceId: (id: string | null) => void;
+  setIsWalkthroughOpen: (isOpen: boolean) => void;
+
+  // Authentication & Role
+  switchRole: (role: Role, userId?: string) => void;
+  loginUser: (emailOrId: string, role?: Role) => boolean;
+  registerUser: (newUser: Partial<User>) => User;
+
+  // Request Lifecycle
+  createRequest: (
+    serviceId: string,
+    formData: Record<string, string>,
+    uploadedDocuments: UploadedFile[]
+  ) => ServiceRequest;
+  verifyDocuments: (requestId: string, remarks: string, forwardToApprover: boolean) => void;
+  requestAdditionalInfo: (requestId: string, query: string) => void;
+  submitAdditionalInfo: (
+    requestId: string,
+    responseText: string,
+    additionalFiles: UploadedFile[]
+  ) => void;
+  approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => void;
+  rejectRequest: (requestId: string, remarks: string) => void;
+  completeRequest: (requestId: string, remarks?: string) => void;
+
+  // Notification Operations
+  markNotificationAsRead: (id: string) => void;
+  markAllNotificationsAsRead: () => void;
+
+  // Service Catalogue Admin Operations
+  updateService: (service: Service) => void;
+  createService: (service: Omit<Service, 'id'>) => Service;
+  toggleServiceStatus: (serviceId: string) => void;
+
+  // Reset Prototype
+  resetToDefaultData: () => void;
+}
+
+const STORAGE_KEYS = {
+  CURRENT_USER: 'stepwise_current_user',
+  REQUESTS: 'stepwise_requests',
+  SERVICES: 'stepwise_services',
+  HISTORIES: 'stepwise_histories',
+  NOTIFICATIONS: 'stepwise_notifications',
+};
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Load or initialize state from localStorage
+  const [users] = useState<User[]>(INITIAL_USERS);
+  const [departments] = useState<Department[]>(INITIAL_DEPARTMENTS);
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_USERS[0]; // Alex Chen, Student
+  });
+
+  const [services, setServices] = useState<Service[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.SERVICES);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_SERVICES;
+  });
+
+  const [requests, setRequests] = useState<ServiceRequest[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_REQUESTS;
+  });
+
+  const [histories, setHistories] = useState<RequestHistory[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.HISTORIES);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_HISTORIES;
+  });
+
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_NOTIFICATIONS;
+  });
+
+  // UI Navigation states
+  const [activeTab, setActiveTabState] = useState<string>('dashboard');
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState<boolean>(false);
+
+  // Sync state changes to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+  }, [currentUser]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.REQUESTS, JSON.stringify(requests));
+  }, [requests]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(services));
+  }, [services]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.HISTORIES, JSON.stringify(histories));
+  }, [histories]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+  }, [notifications]);
+
+  // Navigation helper
+  const setActiveTab = (tab: string, contextId?: string | null) => {
+    if (tab === 'request-detail' && contextId) {
+      setSelectedRequestId(contextId);
+    }
+    if (tab === 'service-detail' && contextId) {
+      setSelectedServiceId(contextId);
+    }
+    if (tab === 'new-request' && contextId) {
+      setSelectedServiceId(contextId);
+    }
+    setActiveTabState(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Role Switching & Demo Authentication
+  const switchRole = (role: Role, userId?: string) => {
+    let targetUser: User | undefined;
+    if (userId) {
+      targetUser = users.find((u) => u.id === userId);
+    } else {
+      // Find representative user for role
+      targetUser = users.find((u) => u.role === role);
+    }
+    if (targetUser) {
+      setCurrentUser(targetUser);
+      // Auto-navigate to appropriate role dashboard
+      if (role === 'STUDENT') setActiveTab('dashboard');
+      else if (role === 'STAFF') setActiveTab('staff-assigned');
+      else if (role === 'APPROVER') setActiveTab('approver-pending');
+      else if (role === 'ADMIN') setActiveTab('admin-dashboard');
+    }
+  };
+
+  const loginUser = (emailOrId: string, role?: Role): boolean => {
+    const found = users.find(
+      (u) =>
+        (u.email.toLowerCase() === emailOrId.toLowerCase() ||
+          u.institutionalId.toLowerCase() === emailOrId.toLowerCase()) &&
+        (!role || u.role === role)
+    );
+    if (found) {
+      setCurrentUser(found);
+      if (found.role === 'STUDENT') setActiveTab('dashboard');
+      else if (found.role === 'STAFF') setActiveTab('staff-assigned');
+      else if (found.role === 'APPROVER') setActiveTab('approver-pending');
+      else if (found.role === 'ADMIN') setActiveTab('admin-dashboard');
+      return true;
+    }
+    // Demo fallback: if matched by role
+    if (role) {
+      switchRole(role);
+      return true;
+    }
+    return false;
+  };
+
+  const registerUser = (newUserData: Partial<User>): User => {
+    const user: User = {
+      id: `usr-${Date.now()}`,
+      name: newUserData.name || 'New Student',
+      email: newUserData.email || 'student@campus.edu',
+      institutionalId: newUserData.institutionalId || `ID-${Math.floor(1000 + Math.random() * 9000)}`,
+      departmentId: newUserData.departmentId || 'dept-acad',
+      role: 'STUDENT',
+      designation: 'Enrolled Student',
+      phone: newUserData.phone || '+1 (555) 000-0000',
+    };
+    setCurrentUser(user);
+    setActiveTab('dashboard');
+    return user;
+  };
+
+  // Request Creation
+  const createRequest = (
+    serviceId: string,
+    formData: Record<string, string>,
+    uploadedDocuments: UploadedFile[]
+  ): ServiceRequest => {
+    const service = services.find((s) => s.id === serviceId);
+    if (!service) throw new Error('Service not found');
+
+    // Generate unique human-readable ID: e.g. SW-2026-0011
+    const nextSeq = requests.length + 1;
+    const formattedSeq = String(nextSeq).padStart(4, '0');
+    const newId = `SW-2026-${formattedSeq}`;
+    const now = new Date().toISOString();
+
+    const newRequest: ServiceRequest = {
+      id: newId,
+      studentId: currentUser.id,
+      studentName: currentUser.name,
+      studentEmail: currentUser.email,
+      studentRoll: currentUser.institutionalId,
+      studentDepartment: currentUser.designation || 'Undergraduate Student',
+      serviceId: service.id,
+      serviceName: service.name,
+      serviceCode: service.code,
+      formData,
+      uploadedDocuments,
+      status: 'Submitted',
+      assignedDepartmentId: service.departmentId,
+      approverId: service.approverId,
+      approverName: service.approverTitle,
+      submittedAt: now,
+      updatedAt: now,
+    };
+
+    // Update requests state
+    setRequests((prev) => [newRequest, ...prev]);
+
+    // Create history event
+    const historyEvent: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId: newId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Request Submitted',
+      previousStatus: 'Draft',
+      newStatus: 'Submitted',
+      remarks: `Request submitted for ${service.name}. Documents attached: ${uploadedDocuments.length}.`,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyEvent, ...prev]);
+
+    // Create in-app notifications
+    const studentNotif: Notification = {
+      id: `notif-${Date.now()}-1`,
+      recipientId: currentUser.id,
+      requestId: newId,
+      title: 'Request Submitted Successfully',
+      message: `Your request ${newId} for "${service.name}" has been received and routed to ${service.departmentId.toUpperCase()}.`,
+      type: 'submission',
+      createdAt: now,
+      isRead: false,
+    };
+
+    const staffNotif: Notification = {
+      id: `notif-${Date.now()}-2`,
+      recipientRole: 'STAFF',
+      requestId: newId,
+      title: 'New Service Request Queued',
+      message: `A new request ${newId} (${service.name}) from ${currentUser.name} is ready for document verification.`,
+      type: 'submission',
+      createdAt: now,
+      isRead: false,
+    };
+
+    setNotifications((prev) => [studentNotif, staffNotif, ...prev]);
+
+    return newRequest;
+  };
+
+  // Staff: Verify Documents
+  const verifyDocuments = (requestId: string, remarks: string, forwardToApprover: boolean) => {
+    const target = requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Verified';
+
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              verificationRemarks: remarks,
+              assignedStaffId: currentUser.id,
+              assignedStaffName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: forwardToApprover ? 'Documents Verified & Forwarded' : 'Documents Verified',
+      previousStatus: target.status,
+      newStatus,
+      remarks,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notifStudent: Notification = {
+      id: `notif-${Date.now()}-1`,
+      recipientId: target.studentId,
+      requestId,
+      title: forwardToApprover ? 'Request Forwarded for Approval' : 'Documents Verified',
+      message: `Staff officer ${currentUser.name} verified your documents for ${requestId}. ${forwardToApprover ? 'Forwarded to Approving Authority.' : ''}`,
+      type: forwardToApprover ? 'forwarded' : 'verification',
+      createdAt: now,
+      isRead: false,
+    };
+
+    const notifApprover: Notification = {
+      id: `notif-${Date.now()}-2`,
+      recipientRole: 'APPROVER',
+      requestId,
+      title: 'Action Required: Request Ready for Decision',
+      message: `Request ${requestId} (${target.serviceName}) verified by ${currentUser.name} and awaiting your final endorsement.`,
+      type: 'forwarded',
+      createdAt: now,
+      isRead: false,
+    };
+
+    setNotifications((prev) => [notifStudent, notifApprover, ...prev]);
+  };
+
+  // Staff: Request Additional Information
+  const requestAdditionalInfo = (requestId: string, query: string) => {
+    const target = requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    const newStatus: RequestStatus = 'Additional Information Required';
+
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              additionalInfoQuery: query,
+              assignedStaffId: currentUser.id,
+              assignedStaffName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Additional Information Requested',
+      previousStatus: target.status,
+      newStatus,
+      remarks: `Officer query: "${query}"`,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientId: target.studentId,
+      requestId,
+      title: 'Action Needed: Additional Information Requested',
+      message: `Staff query for ${requestId}: "${query}". Please attach missing documents or clarifications.`,
+      type: 'info_required',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+  };
+
+  // Student: Submit Additional Information / Documents
+  const submitAdditionalInfo = (
+    requestId: string,
+    responseText: string,
+    additionalFiles: UploadedFile[]
+  ) => {
+    const target = requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    const newStatus: RequestStatus = 'Under Verification';
+
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              additionalInfoResponse: responseText,
+              additionalDocuments: [...(r.additionalDocuments || []), ...additionalFiles],
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Additional Information Resubmitted',
+      previousStatus: target.status,
+      newStatus,
+      remarks: `Student note: "${responseText}". Additional files uploaded: ${additionalFiles.length}.`,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientRole: 'STAFF',
+      requestId,
+      title: 'Student Responded to Information Query',
+      message: `Alex Chen submitted additional documents for ${requestId}. Request returned to verification queue.`,
+      type: 'verification',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+  };
+
+  // Approver: Approve Request
+  const approveRequest = (requestId: string, remarks: string, markCompleted = true) => {
+    const target = requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    const newStatus: RequestStatus = markCompleted ? 'Completed' : 'Approved';
+
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              decisionRemarks: remarks,
+              approverId: currentUser.id,
+              approverName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: markCompleted ? 'Approved & Issued Certificate' : 'Request Endorsed / Approved',
+      previousStatus: target.status,
+      newStatus,
+      remarks: remarks || 'Endorsed and approved according to university guidelines.',
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientId: target.studentId,
+      requestId,
+      title: 'Request Approved & Completed!',
+      message: `Your request ${requestId} (${target.serviceName}) has been approved by ${currentUser.name}. You may now view or download your official stamped document.`,
+      type: 'completion',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+  };
+
+  // Approver: Reject Request
+  const rejectRequest = (requestId: string, remarks: string) => {
+    const target = requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    const newStatus: RequestStatus = 'Rejected';
+
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              decisionRemarks: remarks,
+              approverId: currentUser.id,
+              approverName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Request Rejected',
+      previousStatus: target.status,
+      newStatus,
+      remarks: remarks || 'Does not fulfill academic or administrative eligibility requirements.',
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientId: target.studentId,
+      requestId,
+      title: 'Request Decision: Rejected',
+      message: `Your request ${requestId} was rejected by ${currentUser.name}. Reason: ${remarks}`,
+      type: 'rejection',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+  };
+
+  // Complete Request
+  const completeRequest = (requestId: string, remarks = 'Marked completed by administrator') => {
+    const target = requests.find((r) => r.id === requestId);
+    if (!target) return;
+
+    const now = new Date().toISOString();
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: 'Completed',
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Workflow Marked Completed',
+      previousStatus: target.status,
+      newStatus: 'Completed',
+      remarks,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+  };
+
+  // Notification actions
+  const markNotificationAsRead = (id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+    );
+  };
+
+  const markAllNotificationsAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  };
+
+  // Service Catalogue Admin Ops
+  const updateService = (updated: Service) => {
+    setServices((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  };
+
+  const createService = (newServiceData: Omit<Service, 'id'>): Service => {
+    const newService: Service = {
+      ...newServiceData,
+      id: `srv-${Date.now()}`,
+    };
+    setServices((prev) => [newService, ...prev]);
+    return newService;
+  };
+
+  const toggleServiceStatus = (serviceId: string) => {
+    setServices((prev) =>
+      prev.map((s) => (s.id === serviceId ? { ...s, isActive: !s.isActive } : s))
+    );
+  };
+
+  // Reset Prototype
+  const resetToDefaultData = () => {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    localStorage.removeItem(STORAGE_KEYS.REQUESTS);
+    localStorage.removeItem(STORAGE_KEYS.SERVICES);
+    localStorage.removeItem(STORAGE_KEYS.HISTORIES);
+    localStorage.removeItem(STORAGE_KEYS.NOTIFICATIONS);
+    setCurrentUser(INITIAL_USERS[0]);
+    setRequests(INITIAL_REQUESTS);
+    setServices(INITIAL_SERVICES);
+    setHistories(INITIAL_HISTORIES);
+    setNotifications(INITIAL_NOTIFICATIONS);
+    setActiveTab('dashboard');
+  };
+
+  // Unread notification count for current user role or ID
+  const unreadCount = notifications.filter((n) => {
+    if (n.isRead) return false;
+    if (n.recipientId && n.recipientId === currentUser.id) return true;
+    if (n.recipientRole && n.recipientRole === currentUser.role) return true;
+    return false;
+  }).length;
+
+  return (
+    <AppContext.Provider
+      value={{
+        currentUser,
+        users,
+        departments,
+        services,
+        requests,
+        histories,
+        notifications,
+        activeTab,
+        selectedRequestId,
+        selectedServiceId,
+        unreadCount,
+        isWalkthroughOpen,
+        setActiveTab,
+        setSelectedRequestId,
+        setSelectedServiceId,
+        setIsWalkthroughOpen,
+        switchRole,
+        loginUser,
+        registerUser,
+        createRequest,
+        verifyDocuments,
+        requestAdditionalInfo,
+        submitAdditionalInfo,
+        approveRequest,
+        rejectRequest,
+        completeRequest,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        updateService,
+        createService,
+        toggleServiceStatus,
+        resetToDefaultData,
+      }}
+    >
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
+};
