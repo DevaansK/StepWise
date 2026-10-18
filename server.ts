@@ -141,14 +141,20 @@ app.post('/api/assistant', async (req, res) => {
         parts: [{ text: message }],
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini API call timed out')), 6000)
+      );
+
+      const generatePromise = ai.models.generateContent({
+        model: 'gemini-2.5-flash',
         contents: conversationContents,
         config: {
           systemInstruction: COLLEGE_KNOWLEDGE_CONTEXT,
           temperature: 0.3,
         },
       });
+
+      const response = await Promise.race([generatePromise, timeoutPromise]);
 
       const replyText = response.text || 'I could not generate a response. Please try again.';
 

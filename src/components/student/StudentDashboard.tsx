@@ -26,6 +26,8 @@ export const StudentDashboard: React.FC = () => {
     setIsWalkthroughOpen,
   } = useApp();
 
+  if (!currentUser) return null;
+
   // Filter requests belonging to this student
   const studentRequests = requests.filter((r) => r.studentId === currentUser.id);
 

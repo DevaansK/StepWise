@@ -21,12 +21,13 @@ export const StaffDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const dept = departments.find((d) => d.id === currentUser.departmentId);
+  const dept = departments.find((d) => d.id === currentUser?.departmentId);
 
   // Filter requests strictly assigned to staff member's department
   const deptRequests = useMemo(() => {
+    if (!currentUser) return [];
     return requests.filter((r) => r.assignedDepartmentId === currentUser.departmentId);
-  }, [requests, currentUser.departmentId]);
+  }, [requests, currentUser]);
 
   // Calculated department metrics
   const totalAssigned = deptRequests.length;
@@ -74,7 +75,7 @@ export const StaffDashboard: React.FC = () => {
               </span>
             </div>
             <h1 className="text-xl font-bold text-slate-900 mt-1">
-              Verification Desk: {currentUser.name}
+              Verification Desk: {currentUser?.name}
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               Verify student documents, log audit remarks, query missing files, and forward verified requests to the Approving Authority.

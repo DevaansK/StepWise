@@ -23,6 +23,8 @@ export const MyRequests: React.FC = () => {
   const [serviceFilter, setServiceFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
+  if (!currentUser) return null;
+
   // Filter requests belonging to this student
   const studentRequests = requests.filter((r) => r.studentId === currentUser.id);
 

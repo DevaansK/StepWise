@@ -18,9 +18,21 @@ import {
   INITIAL_HISTORIES,
   INITIAL_NOTIFICATIONS,
 } from '../data/mockData';
+import { hashPassword, DEFAULT_PASSWORD_HASH, DEFAULT_DEMO_PASSWORD } from '../utils/crypto';
+
+export interface LoginResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface RegisterResult {
+  success: boolean;
+  user?: User;
+  error?: string;
+}
 
 interface AppContextType {
-  currentUser: User;
+  currentUser: User | null;
   users: User[];
   departments: Department[];
   services: Service[];
@@ -32,6 +44,7 @@ interface AppContextType {
   selectedServiceId: string | null;
   unreadCount: number;
   isWalkthroughOpen: boolean;
+  isAuthenticated: boolean;
 
   // Actions
   setActiveTab: (tab: string, contextId?: string | null) => void;
@@ -41,10 +54,11 @@ interface AppContextType {
 
   // Authentication & Role
   switchRole: (role: Role, userId?: string) => void;
-  loginUser: (emailOrId: string, role?: Role) => boolean;
-  registerUser: (newUser: Partial<User>) => User;
+  loginUser: (emailOrId: string, password?: string) => Promise<LoginResult>;
+  registerUser: (newUserData: Partial<User> & { password?: string }) => Promise<RegisterResult>;
+  logout: () => void;
 
-  // Request Lifecycle
+  // Request Lifecycle (Shared Central Source of Truth)
   createRequest: (
     serviceId: string,
     formData: Record<string, string>,
@@ -76,6 +90,8 @@ interface AppContextType {
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'stepwise_current_user',
+  USERS: 'stepwise_users',
+  SESSION: 'stepwise_session',
   REQUESTS: 'stepwise_requests',
   SERVICES: 'stepwise_services',
   HISTORIES: 'stepwise_histories',
@@ -85,11 +101,36 @@ const STORAGE_KEYS = {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load or initialize state from localStorage
-  const [users] = useState<User[]>(INITIAL_USERS);
+  // Load departments
   const [departments] = useState<Department[]>(INITIAL_DEPARTMENTS);
 
-  const [currentUser, setCurrentUser] = useState<User>(() => {
+  // Load or initialize users with password hashes
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.USERS);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    // Inject default password hash into initial users
+    return INITIAL_USERS.map((u) => ({
+      ...u,
+      passwordHash: u.passwordHash || DEFAULT_PASSWORD_HASH,
+    }));
+  });
+
+  // Session & Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      const session = localStorage.getItem(STORAGE_KEYS.SESSION);
+      if (session === 'false') return false;
+      return true; // default demo session active
+    } catch {
+      return true;
+    }
+  });
+
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
       if (saved) return JSON.parse(saved);
@@ -97,6 +138,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error(e);
     }
     return INITIAL_USERS[0]; // Alex Chen, Student
+  });
+
+  // Shared requests dataset (Central Single Source of Truth)
+  const [requests, setRequests] = useState<ServiceRequest[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return INITIAL_REQUESTS;
   });
 
   const [services, setServices] = useState<Service[]>(() => {
@@ -107,16 +159,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error(e);
     }
     return INITIAL_SERVICES;
-  });
-
-  const [requests, setRequests] = useState<ServiceRequest[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return INITIAL_REQUESTS;
   });
 
   const [histories, setHistories] = useState<RequestHistory[]>(() => {
@@ -147,8 +189,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync state changes to localStorage
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+    if (currentUser) {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    }
   }, [currentUser]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  }, [users]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SESSION, String(isAuthenticated));
+  }, [isAuthenticated]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.REQUESTS, JSON.stringify(requests));
@@ -187,11 +241,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (userId) {
       targetUser = users.find((u) => u.id === userId);
     } else {
-      // Find representative user for role
       targetUser = users.find((u) => u.role === role);
     }
     if (targetUser) {
       setCurrentUser(targetUser);
+      setIsAuthenticated(true);
       // Auto-navigate to appropriate role dashboard
       if (role === 'STUDENT') setActiveTab('dashboard');
       else if (role === 'STAFF') setActiveTab('staff-assigned');
@@ -200,51 +254,124 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const loginUser = (emailOrId: string, role?: Role): boolean => {
+  // Login handler with password hashing validation
+  const loginUser = async (emailOrId: string, password?: string): Promise<LoginResult> => {
+    const cleanId = emailOrId.trim().toLowerCase();
     const found = users.find(
       (u) =>
-        (u.email.toLowerCase() === emailOrId.toLowerCase() ||
-          u.institutionalId.toLowerCase() === emailOrId.toLowerCase()) &&
-        (!role || u.role === role)
+        u.email.toLowerCase() === cleanId ||
+        u.institutionalId.toLowerCase() === cleanId
     );
-    if (found) {
-      setCurrentUser(found);
-      if (found.role === 'STUDENT') setActiveTab('dashboard');
-      else if (found.role === 'STAFF') setActiveTab('staff-assigned');
-      else if (found.role === 'APPROVER') setActiveTab('approver-pending');
-      else if (found.role === 'ADMIN') setActiveTab('admin-dashboard');
-      return true;
+
+    if (!found) {
+      return {
+        success: false,
+        error: 'No account found with this institutional email or ID.',
+      };
     }
-    // Demo fallback: if matched by role
-    if (role) {
-      switchRole(role);
-      return true;
+
+    // Verify password if provided
+    if (password) {
+      const inputHash = await hashPassword(password);
+      const isDefaultMatch =
+        password === DEFAULT_DEMO_PASSWORD ||
+        inputHash === DEFAULT_PASSWORD_HASH;
+      const isCustomMatch = found.passwordHash && found.passwordHash === inputHash;
+
+      if (!isDefaultMatch && !isCustomMatch) {
+        return {
+          success: false,
+          error: 'Invalid password. Please check your credentials.',
+        };
+      }
     }
-    return false;
+
+    setCurrentUser(found);
+    setIsAuthenticated(true);
+
+    if (found.role === 'STUDENT') setActiveTab('dashboard');
+    else if (found.role === 'STAFF') setActiveTab('staff-assigned');
+    else if (found.role === 'APPROVER') setActiveTab('approver-pending');
+    else if (found.role === 'ADMIN') setActiveTab('admin-dashboard');
+
+    return { success: true };
   };
 
-  const registerUser = (newUserData: Partial<User>): User => {
+  // Register handler with validation, duplicate check, and privilege isolation
+  const registerUser = async (
+    newUserData: Partial<User> & { password?: string }
+  ): Promise<RegisterResult> => {
+    const email = (newUserData.email || '').trim().toLowerCase();
+    const instId = (newUserData.institutionalId || '').trim().toUpperCase();
+
+    if (!newUserData.name || !newUserData.name.trim()) {
+      return { success: false, error: 'Full name is required.' };
+    }
+    if (!email) {
+      return { success: false, error: 'College email address is required.' };
+    }
+    if (!instId) {
+      return { success: false, error: 'Student institutional ID or Roll No is required.' };
+    }
+
+    // Check duplicate email or institutional ID
+    const duplicate = users.find(
+      (u) =>
+        u.email.toLowerCase() === email ||
+        u.institutionalId.toUpperCase() === instId
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: `An account already exists with ${
+          duplicate.email.toLowerCase() === email ? 'this email address' : 'this Student ID'
+        }. Please sign in.`,
+      };
+    }
+
+    // Hash the password securely
+    let passwordHash = DEFAULT_PASSWORD_HASH;
+    if (newUserData.password) {
+      passwordHash = await hashPassword(newUserData.password);
+    }
+
+    // SECURITY ENFORCEMENT: Self-registration is strictly restricted to STUDENT role.
     const user: User = {
       id: `usr-${Date.now()}`,
-      name: newUserData.name || 'New Student',
-      email: newUserData.email || 'student@campus.edu',
-      institutionalId: newUserData.institutionalId || `ID-${Math.floor(1000 + Math.random() * 9000)}`,
+      name: newUserData.name.trim(),
+      email,
+      institutionalId: instId,
       departmentId: newUserData.departmentId || 'dept-acad',
-      role: 'STUDENT',
+      role: 'STUDENT', // Enforce Student privilege only
       designation: 'Enrolled Student',
       phone: newUserData.phone || '+1 (555) 000-0000',
+      passwordHash,
     };
+
+    setUsers((prev) => [user, ...prev]);
     setCurrentUser(user);
+    setIsAuthenticated(true);
     setActiveTab('dashboard');
-    return user;
+
+    return { success: true, user };
   };
 
-  // Request Creation
+  // Logout handler
+  const logout = () => {
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    setActiveTab('auth');
+  };
+
+  // Request Creation (Central source of truth)
   const createRequest = (
     serviceId: string,
     formData: Record<string, string>,
     uploadedDocuments: UploadedFile[]
   ): ServiceRequest => {
+    if (!currentUser) throw new Error('Authentication required');
     const service = services.find((s) => s.id === serviceId);
     if (!service) throw new Error('Service not found');
 
@@ -274,7 +401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: now,
     };
 
-    // Update requests state
+    // Update shared requests state
     setRequests((prev) => [newRequest, ...prev]);
 
     // Create history event
@@ -322,8 +449,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Staff: Verify Documents
   const verifyDocuments = (requestId: string, remarks: string, forwardToApprover: boolean) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    // Department Staff authorization check
+    if (
+      currentUser.role !== 'STAFF' &&
+      currentUser.role !== 'ADMIN'
+    ) {
+      alert('Unauthorized: Only department staff or administrators can verify documents.');
+      return;
+    }
+
+    if (
+      currentUser.role === 'STAFF' &&
+      target.assignedDepartmentId !== currentUser.departmentId
+    ) {
+      alert('Unauthorized: You can only verify requests belonging to your assigned department.');
+      return;
+    }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Verified';
@@ -362,7 +507,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recipientId: target.studentId,
       requestId,
       title: forwardToApprover ? 'Request Forwarded for Approval' : 'Documents Verified',
-      message: `Staff officer ${currentUser.name} verified your documents for ${requestId}. ${forwardToApprover ? 'Forwarded to Approving Authority.' : ''}`,
+      message: `Staff officer ${currentUser.name} verified your documents for ${requestId}. ${
+        forwardToApprover ? 'Forwarded to Approving Authority.' : ''
+      }`,
       type: forwardToApprover ? 'forwarded' : 'verification',
       createdAt: now,
       isRead: false,
@@ -384,8 +531,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Staff: Request Additional Information
   const requestAdditionalInfo = (requestId: string, query: string) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    if (
+      currentUser.role !== 'STAFF' &&
+      currentUser.role !== 'ADMIN'
+    ) {
+      alert('Unauthorized: Only department staff or administrators can request additional information.');
+      return;
+    }
+
+    if (
+      currentUser.role === 'STAFF' &&
+      target.assignedDepartmentId !== currentUser.departmentId
+    ) {
+      alert('Unauthorized: You can only query requests belonging to your assigned department.');
+      return;
+    }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Additional Information Required';
@@ -438,8 +602,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     responseText: string,
     additionalFiles: UploadedFile[]
   ) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    // Student identity check
+    if (currentUser.role === 'STUDENT' && target.studentId !== currentUser.id) {
+      alert('Unauthorized: You can only respond to your own service requests.');
+      return;
+    }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Under Verification';
@@ -477,7 +648,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recipientRole: 'STAFF',
       requestId,
       title: 'Student Responded to Information Query',
-      message: `Alex Chen submitted additional documents for ${requestId}. Request returned to verification queue.`,
+      message: `${currentUser.name} submitted additional documents for ${requestId}. Request returned to verification queue.`,
       type: 'verification',
       createdAt: now,
       isRead: false,
@@ -487,8 +658,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Approver: Approve Request
   const approveRequest = (requestId: string, remarks: string, markCompleted = true) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
+      alert('Unauthorized: Only authorized Approving Authorities can endorse requests.');
+      return;
+    }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = markCompleted ? 'Completed' : 'Approved';
@@ -537,8 +714,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Approver: Reject Request
   const rejectRequest = (requestId: string, remarks: string) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
+      alert('Unauthorized: Only authorized Approving Authorities can reject requests.');
+      return;
+    }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Rejected';
@@ -587,6 +770,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Complete Request
   const completeRequest = (requestId: string, remarks = 'Marked completed by administrator') => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
 
@@ -631,10 +815,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Service Catalogue Admin Ops
   const updateService = (updated: Service) => {
+    if (currentUser?.role !== 'ADMIN') {
+      alert('Unauthorized: Only administrators can update services.');
+      return;
+    }
     setServices((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   };
 
   const createService = (newServiceData: Omit<Service, 'id'>): Service => {
+    if (currentUser?.role !== 'ADMIN') {
+      throw new Error('Unauthorized: Only administrators can create services.');
+    }
     const newService: Service = {
       ...newServiceData,
       id: `srv-${Date.now()}`,
@@ -644,19 +835,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleServiceStatus = (serviceId: string) => {
+    if (currentUser?.role !== 'ADMIN') {
+      alert('Unauthorized: Only administrators can enable or disable services.');
+      return;
+    }
     setServices((prev) =>
       prev.map((s) => (s.id === serviceId ? { ...s, isActive: !s.isActive } : s))
     );
   };
 
-  // Reset Prototype
+  // Reset Prototype Data
   const resetToDefaultData = () => {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    localStorage.removeItem(STORAGE_KEYS.USERS);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
     localStorage.removeItem(STORAGE_KEYS.REQUESTS);
     localStorage.removeItem(STORAGE_KEYS.SERVICES);
     localStorage.removeItem(STORAGE_KEYS.HISTORIES);
     localStorage.removeItem(STORAGE_KEYS.NOTIFICATIONS);
-    setCurrentUser(INITIAL_USERS[0]);
+
+    const freshUsers = INITIAL_USERS.map((u) => ({
+      ...u,
+      passwordHash: DEFAULT_PASSWORD_HASH,
+    }));
+
+    setUsers(freshUsers);
+    setCurrentUser(freshUsers[0]);
+    setIsAuthenticated(true);
     setRequests(INITIAL_REQUESTS);
     setServices(INITIAL_SERVICES);
     setHistories(INITIAL_HISTORIES);
@@ -667,6 +872,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Unread notification count for current user role or ID
   const unreadCount = notifications.filter((n) => {
     if (n.isRead) return false;
+    if (!currentUser) return false;
     if (n.recipientId && n.recipientId === currentUser.id) return true;
     if (n.recipientRole && n.recipientRole === currentUser.role) return true;
     return false;
@@ -687,6 +893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         selectedServiceId,
         unreadCount,
         isWalkthroughOpen,
+        isAuthenticated,
         setActiveTab,
         setSelectedRequestId,
         setSelectedServiceId,
@@ -694,6 +901,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         switchRole,
         loginUser,
         registerUser,
+        logout,
         createRequest,
         verifyDocuments,
         requestAdditionalInfo,

@@ -90,7 +90,7 @@ export const AdminUsers: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredUsers.map((u) => {
-                const isCurrent = currentUser.id === u.id;
+                const isCurrent = currentUser?.id === u.id;
 
                 return (
                   <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">

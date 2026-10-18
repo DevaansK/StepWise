@@ -23,6 +23,8 @@ export const NotificationsView: React.FC = () => {
 
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
 
+  if (!currentUser) return null;
+
   // Filter notifications relevant to current user
   const relevantNotifs = notifications.filter((n) => {
     if (n.recipientId && n.recipientId === currentUser.id) return true;

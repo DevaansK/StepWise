@@ -41,11 +41,11 @@ import { ProfileView } from './components/profile/ProfileView';
 import { AuthView } from './components/auth/AuthView';
 
 const MainLayout: React.FC = () => {
-  const { activeTab, currentUser } = useApp();
+  const { activeTab, currentUser, isAuthenticated } = useApp();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  // If in auth screen mode
-  if (activeTab === 'auth') {
+  // If not authenticated or in auth screen mode, display AuthView
+  if (!isAuthenticated || !currentUser || activeTab === 'auth') {
     return <AuthView />;
   }
 

@@ -26,6 +26,7 @@ export interface User {
   designation?: string;
   avatarUrl?: string;
   phone?: string;
+  passwordHash?: string;
 }
 
 export interface Department {

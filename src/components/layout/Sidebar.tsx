@@ -32,7 +32,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
     unreadCount,
     requests,
     setIsWalkthroughOpen,
+    logout,
   } = useApp();
+
+  if (!currentUser) return null;
 
   // Role-specific navigation items
   const getNavItems = () => {
@@ -269,9 +272,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
             </button>
           </div>
 
-          <div className="flex items-center justify-between px-2 pt-1 text-[11px] text-slate-400">
-            <span>StepWise v2.4</span>
+          <div className="flex items-center justify-between px-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400">
             <span className="text-teal-400 font-mono">MIT Campus</span>
+            <button
+              onClick={() => logout()}
+              className="inline-flex items-center gap-1 text-slate-400 hover:text-rose-400 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
           </div>
         </div>
       </aside>

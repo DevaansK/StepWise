@@ -56,6 +56,25 @@ export const RequestDetailView: React.FC = () => {
     );
   }
 
+  // Student Access Isolation Guard
+  if (currentUser?.role === 'STUDENT' && request.studentId !== currentUser.id) {
+    return (
+      <div className="p-8 text-center bg-white rounded-xl border border-rose-200">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-2" />
+        <h3 className="text-sm font-bold text-slate-800">Access Restricted</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          Students can only access and view their own submitted administrative service requests.
+        </p>
+        <button
+          onClick={() => setActiveTab('my-requests')}
+          className="mt-3 px-4 py-1.5 text-xs font-semibold text-white bg-indigo-900 rounded-lg shadow-sm"
+        >
+          Return to My Requests
+        </button>
+      </div>
+    );
+  }
+
   const dept = departments.find((d) => d.id === request.assignedDepartmentId);
   const requestHistories = histories
     .filter((h) => h.requestId === request.id)
@@ -98,9 +117,9 @@ export const RequestDetailView: React.FC = () => {
       <div className="flex items-center justify-between">
         <button
           onClick={() => {
-            if (currentUser.role === 'STAFF') setActiveTab('staff-assigned');
-            else if (currentUser.role === 'APPROVER') setActiveTab('approver-pending');
-            else if (currentUser.role === 'ADMIN') setActiveTab('admin-requests');
+            if (currentUser?.role === 'STAFF') setActiveTab('staff-assigned');
+            else if (currentUser?.role === 'APPROVER') setActiveTab('approver-pending');
+            else if (currentUser?.role === 'ADMIN') setActiveTab('admin-requests');
             else setActiveTab('my-requests');
           }}
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors"

@@ -29,6 +29,8 @@ export const ApproverDashboard: React.FC = () => {
     setActiveTab,
   } = useApp();
 
+  if (!currentUser) return null;
+
   // Requests requiring decision: Pending Approval or Verified
   const pendingApprovals = useMemo(() => {
     return requests.filter(
@@ -67,7 +69,7 @@ export const ApproverDashboard: React.FC = () => {
         `Endorsed and approved according to university academic regulations. Validated by ${currentUser.name}.`
       );
     }
-  }, [selectedRequest?.id, currentUser.name]);
+  }, [selectedRequest?.id, currentUser?.name]);
 
   const handleApprove = () => {
     if (!selectedRequest) return;
@@ -111,7 +113,7 @@ export const ApproverDashboard: React.FC = () => {
               </span>
             </div>
             <h1 className="text-xl font-bold text-slate-900 mt-1">
-              Executive Endorsement: {currentUser.name}
+              Executive Endorsement: {currentUser?.name}
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               Review verified requests, inspect department audit remarks, and grant official institutional endorsement.

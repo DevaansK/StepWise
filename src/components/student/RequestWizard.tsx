@@ -51,6 +51,8 @@ export const RequestWizard: React.FC = () => {
     }
   }, [selectedServiceId, services]);
 
+  if (!currentUser) return null;
+
   const handleSelectService = (srv: Service) => {
     setSelectedService(srv);
     setSelectedServiceId(srv.id);

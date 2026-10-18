@@ -1,10 +1,12 @@
 import React from 'react';
-import { User, Shield, Building, Mail, Phone, RotateCcw, CheckCircle, Sparkles } from 'lucide-react';
+import { User, Shield, Building, Mail, Phone, RotateCcw, CheckCircle, Sparkles, LogOut } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 export const ProfileView: React.FC = () => {
-  const { currentUser, departments, switchRole, resetToDefaultData, setIsWalkthroughOpen } =
+  const { currentUser, departments, switchRole, resetToDefaultData, setIsWalkthroughOpen, logout } =
     useApp();
+
+  if (!currentUser) return null;
 
   const dept = departments.find((d) => d.id === currentUser.departmentId);
 
@@ -33,13 +35,23 @@ export const ProfileView: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={() => setIsWalkthroughOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors self-start sm:self-auto"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Guided Tour</span>
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={() => setIsWalkthroughOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Guided Tour</span>
+            </button>
+
+            <button
+              onClick={() => logout()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
+          </div>
         </div>
 
         {/* Details Grid */}

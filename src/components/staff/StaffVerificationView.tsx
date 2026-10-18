@@ -32,6 +32,8 @@ export const StaffVerificationView: React.FC = () => {
     setActiveTab,
   } = useApp();
 
+  if (!currentUser) return null;
+
   // Filter department requests
   const deptRequests = requests.filter(
     (r) => r.assignedDepartmentId === currentUser.departmentId
