@@ -80,35 +80,64 @@ export const RequestDetailView: React.FC = () => {
     .filter((h) => h.requestId === request.id)
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-  // Handle student attaching additional response files
-  const handleAddResponseFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  // Read and validate supplemental files before uploading them to private Storage.
+  const handleAddResponseFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
-
-    const newFile: UploadedFile = {
-      id: `add-up-${Date.now()}`,
-      docId: 'doc-additional-response',
-      docName: 'Supplemental Document / Clarification',
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type || 'application/pdf',
-      uploadedAt: new Date().toISOString(),
-      previewType: file.type.includes('image') ? 'image' : 'pdf',
-    };
-    setAdditionalFiles((prev) => [...prev, newFile]);
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) {
+      alert('Upload a PDF, JPEG, or PNG file.');
+      input.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File must be 10 MB or smaller.');
+      input.value = '';
+      return;
+    }
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read file'));
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
+      const newFile: UploadedFile = {
+        id: `add-up-${Date.now()}`,
+        docId: 'doc-additional-response',
+        docName: 'Supplemental Document / Clarification',
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        uploadedAt: new Date().toISOString(),
+        previewType: file.type.startsWith('image/') ? 'image' : 'pdf',
+        dataUrl,
+      };
+      setAdditionalFiles((prev) => [...prev, newFile]);
+    } catch {
+      alert('Could not read this file. Please choose it again.');
+    } finally {
+      input.value = '';
+    }
   };
 
-  const handleResubmit = () => {
+  const handleResubmit = async () => {
     if (!responseText.trim() && additionalFiles.length === 0) {
       alert('Please provide a response message or attach the requested document.');
       return;
     }
     setIsResubmitting(true);
-    submitAdditionalInfo(request.id, responseText, additionalFiles);
-    setIsResubmitting(false);
-    setResponseText('');
-    setAdditionalFiles([]);
-    alert('Information resubmitted! Request has returned to Under Verification.');
+    try {
+      await submitAdditionalInfo(request.id, responseText, additionalFiles);
+      setResponseText('');
+      setAdditionalFiles([]);
+      alert('Information resubmitted. The request has returned to verification.');
+    } catch (error) {
+      console.error('Additional information submission failed:', error);
+      alert(error instanceof Error ? error.message : 'Could not submit additional information. Please try again.');
+    } finally {
+      setIsResubmitting(false);
+    }
   };
 
   return (
