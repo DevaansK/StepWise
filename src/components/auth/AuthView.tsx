@@ -211,8 +211,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
 
       <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 shadow-xl rounded-2xl border border-slate-200/80 sm:px-10 space-y-6">
-          {/* Fast Demo Role Switcher Shelf */}
-          <div className="p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-2">
+          {/* Demo accounts are available only when Supabase is not configured. */}
+          {!isSupabaseConfigured && <div className="p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-100 space-y-2">
             <div className="flex items-center justify-between text-xs font-bold text-indigo-950">
               <span className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-teal-600" />
@@ -247,7 +247,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
 
           {/* Mode Switch Tabs */}
           <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg text-xs font-medium">
@@ -346,7 +346,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
                   />
                   <span>Remember me</span>
                 </label>
-                <button
+                {!isSupabaseConfigured && <button
                   type="button"
                   onClick={() => {
                     setLoginIdentifier('alex.chen@campus.edu');
@@ -355,7 +355,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
                   className="text-[11px] text-indigo-700 hover:underline"
                 >
                   Fill default student
-                </button>
+                </button>}
               </div>
 
               <button
