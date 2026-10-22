@@ -80,7 +80,7 @@ export const StaffVerificationView: React.FC = () => {
   // Cross-department permission guard
   const isAuthorizedDept = activeRequest.assignedDepartmentId === currentUser.departmentId;
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     if (!isAuthorizedDept) {
       alert('Unauthorized: You can only process requests assigned to your department.');
       return;
@@ -90,13 +90,18 @@ export const StaffVerificationView: React.FC = () => {
       return;
     }
     setIsProcessing(true);
-    verifyDocuments(activeRequest.id, remarks, true);
-    setIsProcessing(false);
-    alert(`Request ${activeRequest.id} verified and forwarded to Approving Authority!`);
-    setActiveTab('staff-assigned');
+    try {
+      await verifyDocuments(activeRequest.id, remarks, true);
+      alert(`Request ${activeRequest.id} verified and forwarded to Approving Authority!`);
+      setActiveTab('staff-assigned');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'The request could not be updated. Refresh and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const handleRequestInfo = () => {
+  const handleRequestInfo = async () => {
     if (!isAuthorizedDept) {
       alert('Unauthorized: You can only process requests assigned to your department.');
       return;
@@ -106,10 +111,15 @@ export const StaffVerificationView: React.FC = () => {
       return;
     }
     setIsProcessing(true);
-    requestAdditionalInfo(activeRequest.id, queryText);
-    setIsProcessing(false);
-    alert(`Query sent to student ${activeRequest.studentName}! Request status updated.`);
-    setActiveTab('staff-assigned');
+    try {
+      await requestAdditionalInfo(activeRequest.id, queryText);
+      alert(`Query sent to student ${activeRequest.studentName}! Request status updated.`);
+      setActiveTab('staff-assigned');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'The request could not be updated. Refresh and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
