@@ -575,8 +575,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Update shared requests state
     setRequests((prev) => [newRequest, ...prev]);
 
-    // Persist to Supabase when real authentication is configured. Document bytes are
-    // intentionally not sent as data URLs; private file storage needs a separate bucket/policy.
+    // Persist to Supabase and private Storage before returning a successful submission.
     if (supabase) {
       let savedRequestId: string | null = null;
       const persistedDocuments: Record<string, unknown>[] = [];
@@ -692,7 +691,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const staffNotif: Notification = {
       id: `notif-${Date.now()}-2`,
       recipientRole: 'STAFF',
-      requestId: newId,
+      requestId: trackingRequestId,
       title: 'New Service Request Queued',
       message: `A new request ${trackingRequestId} (${service.name}) from ${currentUser.name} is ready for document verification.`,
       type: 'submission',
