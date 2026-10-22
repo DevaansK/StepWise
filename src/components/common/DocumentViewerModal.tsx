@@ -15,8 +15,8 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   isOpen,
   file,
   onClose,
-  studentName = 'Alex Chen',
-  studentRoll = 'CS-2023-042',
+  studentName = 'Student',
+  studentRoll = 'Not provided',
 }) => {
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
   const [loadingDocument, setLoadingDocument] = useState(false);
@@ -92,16 +92,16 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             <div className="flex items-start justify-between border-b border-slate-100 pb-4">
               <div>
                 <span className="text-[10px] tracking-widest uppercase font-bold text-indigo-800">
-                  INSTITUTIONAL DOCUMENT REPOSITORY
+                  PRIVATE DOCUMENT STORAGE
                 </span>
                 <h4 className="text-sm font-bold text-slate-900 mt-0.5">
-                  Verified Student Submission Attachment
+                  {file.storagePath ? 'Stored request attachment' : 'Document preview'}
                 </h4>
-                <p className="text-xs text-slate-500">Security Checksum: MD5-{Math.random().toString(36).substring(2, 9).toUpperCase()}</p>
+                <p className="text-xs text-slate-500">Access is controlled by your authenticated StepWise account.</p>
               </div>
               <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Uploaded</span>
+                <span>{documentUrl ? 'Available' : loadingDocument ? 'Loading' : 'Unavailable'}</span>
               </div>
             </div>
 
