@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import neonApi from './src/server/neonApi.js';
 
 dotenv.config();
 
@@ -13,6 +14,7 @@ const PORT = Number(process.env.PORT) || 3000;
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+app.use('/api', neonApi);
 
 // Initialize GoogleGenAI if key is present
 const apiKey = process.env.GEMINI_API_KEY;
