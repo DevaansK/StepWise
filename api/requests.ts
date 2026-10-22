@@ -1,7 +1,7 @@
 type JsonRecord = Record<string, unknown>;
 
 const config = () => ({
-  url: process.env.SUPABASE_URL?.replace(/\\/$/, ''),
+  url: process.env.SUPABASE_URL?.replace(/\/$/, ''),
   anonKey: process.env.SUPABASE_ANON_KEY,
 });
 
