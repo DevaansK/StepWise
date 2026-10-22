@@ -662,6 +662,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    // Database RPCs create persistent audit and notifications for authenticated sessions.
+    // Use local-only events exclusively in demo mode to avoid duplicate entries.
+    if (!supabase) {
     // Create history event
     const historyEvent: RequestHistory = {
       id: `hist-${Date.now()}`,
@@ -701,6 +704,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setNotifications((prev) => [studentNotif, staffNotif, ...prev]);
+
+    }
 
     return { ...newRequest, id: trackingRequestId, databaseId: persistedDatabaseId };
   };
