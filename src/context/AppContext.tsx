@@ -656,6 +656,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    if (supabase && target.databaseId) {
+      void supabase.rpc('stepwise_staff_update_request', {
+        p_request_id: target.databaseId,
+        p_action: forwardToApprover ? 'verify' : 'start_verification',
+        p_comment: remarks || null,
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Server-side verification failed:', error.message);
+          window.alert('The server could not update this request. Refresh and try again.');
+        }
+      });
+    }
     const now = new Date().toISOString();
     const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Verified';
 
@@ -737,6 +749,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    if (supabase && target.databaseId) {
+      void supabase.rpc('stepwise_staff_update_request', {
+        p_request_id: target.databaseId,
+        p_action: 'request_information',
+        p_comment: query,
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Server-side information request failed:', error.message);
+          window.alert('The server could not update this request. Refresh and try again.');
+        }
+      });
+    }
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Additional Information Required';
 
@@ -853,6 +877,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    if (supabase && target.databaseId) {
+      void supabase.rpc('stepwise_approver_decide', {
+        p_request_id: target.databaseId,
+        p_decision: 'approve',
+        p_comment: remarks || null,
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Server-side approval failed:', error.message);
+          window.alert('The server could not approve this request. Refresh and try again.');
+        }
+      });
+    }
     const now = new Date().toISOString();
     const newStatus: RequestStatus = markCompleted ? 'Completed' : 'Approved';
 
@@ -909,6 +945,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    if (supabase && target.databaseId) {
+      void supabase.rpc('stepwise_approver_decide', {
+        p_request_id: target.databaseId,
+        p_decision: 'reject',
+        p_comment: remarks,
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Server-side rejection failed:', error.message);
+          window.alert('The server could not reject this request. Refresh and try again.');
+        }
+      });
+    }
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Rejected';
 
