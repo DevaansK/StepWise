@@ -617,11 +617,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (!fileResponse.ok) throw new Error('Could not read uploaded file ' + uploaded.fileName);
             const blob = await fileResponse.blob();
             const safeFileName = uploaded.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const storagePath = authUser.id + '/' + saved.id + '/' + uploaded.id + '-' + safeFileName;
+            const safeFileId = uploaded.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const storagePath = authUser.id + '/' + saved.id + '/' + safeFileId + '-' + safeFileName;
             const { error: uploadError } = await supabase.storage
               .from('stepwise-documents')
               .upload(storagePath, blob, {
-                contentType: uploaded.fileType || blob.type || 'application/pdf',
+                contentType: blob.type || uploaded.fileType || 'application/pdf',
                 upsert: false,
               });
             if (uploadError) throw uploadError;
