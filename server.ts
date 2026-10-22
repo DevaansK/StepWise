@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import neonApi from './src/server/neonApi.js';
+import neonApi from './src/server/neonApi.ts';
 
 dotenv.config();
 
