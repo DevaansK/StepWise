@@ -822,6 +822,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
+    if (supabase && target.databaseId) {
+      const safeDocuments = additionalFiles.map(({ dataUrl: _dataUrl, ...doc }) => doc);
+      void supabase.rpc('stepwise_student_submit_additional_info', {
+        p_request_id: target.databaseId,
+        p_response: responseText,
+        p_documents: safeDocuments,
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Server-side additional information submission failed:', error.message);
+          window.alert('The server could not save your response. Refresh the request and try again.');
+        }
+      });
+    }
+
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Under Verification';
 
@@ -1019,6 +1033,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
     if (!target) return;
+
+    if (supabase && target.databaseId) {
+      void supabase.rpc('stepwise_complete_request', {
+        p_request_id: target.databaseId,
+        p_comment: remarks,
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Server-side completion failed:', error.message);
+          window.alert('The server could not complete this request. Refresh and try again.');
+        }
+      });
+    }
 
     const now = new Date().toISOString();
     setRequests((prev) =>
