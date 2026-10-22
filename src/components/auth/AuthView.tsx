@@ -295,7 +295,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
 
               <div className="space-y-1">
                 <label className="block font-semibold text-slate-700">
-                  Institutional Email or Student/Staff ID
+                  Registered Email Address
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -303,7 +303,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
                     type="text"
                     value={loginIdentifier}
                     onChange={(e) => setLoginIdentifier(e.target.value)}
-                    placeholder="e.g., alex.chen@campus.edu or CS-2023-042"
+                    placeholder="you@college.edu"
                     className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-slate-800"
                     required
                   />
@@ -313,7 +313,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="block font-semibold text-slate-700">Password</label>
-                  <span className="text-[10px] text-slate-400 font-mono">Demo: password123</span>
+                  {!isSupabaseConfigured && <span className="text-[10px] text-slate-400 font-mono">Demo: password123</span>}
                 </div>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -453,7 +453,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-700">Password (min 6) *</label>
+                  <label className="block font-semibold text-slate-700">Password (min 8) *</label>
                   <div className="relative">
                     <input
                       type={showConfirmPassword ? 'text' : 'password'}
