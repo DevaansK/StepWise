@@ -19,6 +19,7 @@ import {
   INITIAL_NOTIFICATIONS,
 } from '../data/mockData';
 import { hashPassword, DEFAULT_PASSWORD_HASH, DEFAULT_DEMO_PASSWORD } from '../utils/crypto';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export interface LoginResult {
   success: boolean;
@@ -121,16 +122,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Session & Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (isSupabaseConfigured) return false;
     try {
       const session = localStorage.getItem(STORAGE_KEYS.SESSION);
       if (session === 'false') return false;
-      return true; // default demo session active
+      return true; // legacy demo mode only
     } catch {
       return true;
     }
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    if (isSupabaseConfigured) return null;
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
       if (saved) return JSON.parse(saved);
@@ -187,8 +190,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState<boolean>(false);
 
-  // Sync state changes to localStorage
+  // Restore real Supabase sessions when configured. Demo mode remains available only without configuration.
   useEffect(() => {
+    if (!supabase) return;
+    let mounted = true;
+    const loadProfile = async (userId: string) => {
+      const { data, error } = await supabase.from('profiles').select('id, full_name, email, institutional_id, department, role, phone').eq('id', userId).maybeSingle();
+      if (!mounted) return;
+      if (error || !data) {
+        console.error('Unable to load StepWise profile:', error?.message || 'Profile not found');
+        setCurrentUser(null);
+        setIsAuthenticated(false);
+        return;
+      }
+      const roleMap: Record<string, Role> = { student: 'STUDENT', department_staff: 'STAFF', approver: 'APPROVER', admin: 'ADMIN' };
+      const mapped: User = {
+        id: data.id,
+        name: data.full_name || 'Student',
+        email: data.email || '',
+        institutionalId: data.institutional_id || '',
+        departmentId: data.department || 'dept-acad',
+        role: roleMap[data.role] || 'STUDENT',
+        phone: data.phone || undefined,
+      };
+      setCurrentUser(mapped);
+      setIsAuthenticated(true);
+      if (mapped.role === 'STAFF') setActiveTab('staff-assigned');
+      else if (mapped.role === 'APPROVER') setActiveTab('approver-pending');
+      else if (mapped.role === 'ADMIN') setActiveTab('admin-dashboard');
+      else setActiveTab('dashboard');
+    };
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) console.error('Session restore failed:', error.message);
+      if (!mounted) return;
+      if (data.session?.user) void loadProfile(data.session.user.id);
+      else { setCurrentUser(null); setIsAuthenticated(false); }
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (session?.user) {
+        // Defer Supabase queries outside the auth callback to avoid lock contention.
+        window.setTimeout(() => { if (mounted) void loadProfile(session.user.id); }, 0);
+      } else {
+        setCurrentUser(null);
+        setIsAuthenticated(false);
+      }
+    });
+    return () => { mounted = false; listener.subscription.unsubscribe(); };
+  }, []);
+
+  // Sync demo-only state to localStorage; real sessions are managed by Supabase Auth.
+  useEffect(() => {
+    if (isSupabaseConfigured) return;
     if (currentUser) {
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
     } else {
@@ -197,26 +250,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentUser]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
   }, [users]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.SESSION, String(isAuthenticated));
   }, [isAuthenticated]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.REQUESTS, JSON.stringify(requests));
   }, [requests]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(services));
   }, [services]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.HISTORIES, JSON.stringify(histories));
   }, [histories]);
 
   useEffect(() => {
+    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
   }, [notifications]);
 
@@ -237,6 +296,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Role Switching & Demo Authentication
   const switchRole = (role: Role, userId?: string) => {
+    if (isSupabaseConfigured) {
+      console.warn('Demo role switching is disabled when real authentication is configured.');
+      return;
+    }
     let targetUser: User | undefined;
     if (userId) {
       targetUser = users.find((u) => u.id === userId);
@@ -257,6 +320,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Login handler with password hashing validation
   const loginUser = async (emailOrId: string, password?: string): Promise<LoginResult> => {
     const cleanId = emailOrId.trim().toLowerCase();
+    if (supabase) {
+      if (!password) return { success: false, error: 'Password is required.' };
+      let email = cleanId;
+      if (!cleanId.includes('@')) {
+        const { data: profile, error: lookupError } = await supabase.from('profiles').select('email').ilike('institutional_id', cleanId).maybeSingle();
+        if (lookupError || !profile?.email) return { success: false, error: 'No account found with this institutional email or ID.' };
+        email = profile.email;
+      }
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    }
     const found = users.find(
       (u) =>
         u.email.toLowerCase() === cleanId ||
@@ -303,6 +378,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): Promise<RegisterResult> => {
     const email = (newUserData.email || '').trim().toLowerCase();
     const instId = (newUserData.institutionalId || '').trim().toUpperCase();
+    if (supabase) {
+      if (!newUserData.name?.trim() || !email || !instId || !newUserData.password) {
+        return { success: false, error: 'Name, college email, institutional ID, and password are required.' };
+      }
+      if (newUserData.password.length < 8) return { success: false, error: 'Password must be at least 8 characters long.' };
+      const { data: duplicate } = await supabase.from('profiles').select('id').or('email.eq.' + email + ',institutional_id.eq.' + instId).limit(1);
+      if (duplicate?.length) return { success: false, error: 'An account already exists with this email or institutional ID.' };
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: newUserData.password,
+        options: { data: { full_name: newUserData.name.trim(), institutional_id: instId, department: newUserData.departmentId || 'dept-acad', phone: newUserData.phone || '' }, emailRedirectTo: window.location.origin },
+      });
+      if (error) return { success: false, error: error.message };
+      if (!data.session) return { success: false, error: 'Registration created. Check your email to confirm the account, then sign in.' };
+      return { success: true };
+    }
 
     if (!newUserData.name || !newUserData.name.trim()) {
       return { success: false, error: 'Full name is required.' };
@@ -358,6 +449,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Logout handler
   const logout = () => {
+    if (supabase) {
+      void supabase.auth.signOut().then(({ error }) => { if (error) console.error('Sign out failed:', error.message); });
+    }
     setIsAuthenticated(false);
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEYS.SESSION);
