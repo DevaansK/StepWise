@@ -498,6 +498,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Update shared requests state
     setRequests((prev) => [newRequest, ...prev]);
 
+    // Persist to Supabase when real authentication is configured. Document bytes are
+    // intentionally not sent as data URLs; private file storage needs a separate bucket/policy.
+    if (supabase) {
+      void (async () => {
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          const authUser = authData.user;
+          if (!authUser) throw new Error('Authentication required');
+          const { data: dbService, error: serviceError } = await supabase
+            .from('services').select('id,name,department').eq('name', service.name).maybeSingle();
+          if (serviceError || !dbService) throw new Error(serviceError?.message || 'Service is not configured in the database');
+          const safeDocuments = uploadedDocuments.map(({ dataUrl: _dataUrl, ...doc }) => doc);
+          const { data: saved, error } = await supabase.from('service_requests').insert({
+            student_id: authUser.id,
+            service_id: dbService.id,
+            description: Object.entries(formData).map(([key, value]) => key + ': ' + value).join('\\n'),
+            status: 'submitted',
+            service_name: service.name,
+            service_code: service.code,
+            student_name: currentUser.name,
+            student_email: currentUser.email,
+            student_roll: currentUser.institutionalId,
+            student_department: currentUser.departmentId,
+            form_data: formData,
+            uploaded_documents: safeDocuments,
+            assigned_department_id: dbService.department,
+          }).select('id,tracking_number').single();
+          if (error) throw error;
+          setRequests((prev) => prev.map((request) => request.id === newId
+            ? { ...request, databaseId: saved.id }
+            : request));
+          const { error: historyError } = await supabase.from('request_history').insert({
+            request_id: saved.id,
+            changed_by: authUser.id,
+            old_status: 'draft',
+            new_status: 'submitted',
+            comment: 'Request submitted for ' + service.name,
+          });
+          if (historyError) console.error('Request saved but history could not be recorded:', historyError.message);
+        } catch (error) {
+          console.error('StepWise request was not saved to Supabase:', error);
+          window.alert('The request could not be saved to the server. Please try again before leaving this page.');
+          setRequests((prev) => prev.filter((request) => request.id !== newId));
+        }
+      })();
+    }
+
     // Create history event
     const historyEvent: RequestHistory = {
       id: `hist-${Date.now()}`,
