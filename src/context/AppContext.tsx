@@ -249,12 +249,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const client = supabase;
     let cancelled = false;
     const loadRequests = async () => {
-      const { data, error } = await client.from('service_requests').select('*').order('submitted_at', { ascending: false });
-      if (cancelled) return;
-      if (error) {
-        console.error('Unable to load StepWise requests:', error.message);
+      const { data: sessionData } = await client.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) return;
+      let data: any[] = [];
+      try {
+        const response = await fetch('/api/requests', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not load requests');
+        data = Array.isArray(result) ? result : [];
+      } catch (error) {
+        console.error('Unable to load StepWise requests from Neon:', error);
         return;
       }
+      if (cancelled) return;
       const statusMap: Record<string, RequestStatus> = {
         draft: 'Draft', submitted: 'Submitted', under_verification: 'Under Verification',
         additional_information_required: 'Additional Information Required', verified: 'Verified',
@@ -580,85 +590,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Update shared requests state
     setRequests((prev) => [newRequest, ...prev]);
 
-    // Persist to Supabase and private Storage before returning a successful submission.
+    // Persist the request through the authenticated Express API backed by Neon.
     if (supabase) {
-      let savedRequestId: string | null = null;
-      const persistedDocuments: Record<string, unknown>[] = [];
       try {
-          const { data: authData } = await supabase.auth.getUser();
-          const authUser = authData.user;
-          if (!authUser) throw new Error('Authentication required');
-          const { data: dbService, error: serviceError } = await supabase
-            .from('services').select('id,name,department').eq('name', service.name).maybeSingle();
-          if (serviceError || !dbService) throw new Error(serviceError?.message || 'Service is not configured in the database');
-          const { data: saved, error } = await supabase.from('service_requests').insert({
-            student_id: authUser.id,
-            service_id: dbService.id,
-            description: Object.entries(formData).map(([key, value]) => key + ': ' + value).join('\\n'),
-            status: 'submitted',
-            service_name: service.name,
-            service_code: service.code,
-            student_name: currentUser.name,
-            student_email: currentUser.email,
-            student_roll: currentUser.institutionalId,
-            student_department: currentUser.departmentId,
-            form_data: formData,
-            uploaded_documents: [],
-            assigned_department_id: dbService.department,
-          }).select('id,tracking_number,submitted_at').single();
-          if (error) throw error;
-          savedRequestId = saved.id;
-          persistedDatabaseId = saved.id;
-          trackingRequestId = `SW-${new Date(saved.submitted_at).getFullYear()}-${String(saved.tracking_number).padStart(4, '0')}`;
-          setRequests((prev) => prev.map((request) => request.id === newId
-            ? { ...request, id: trackingRequestId, databaseId: saved.id }
-            : request));
-
-          for (const uploaded of uploadedDocuments) {
-            const { dataUrl, ...metadata } = uploaded;
-            if (!dataUrl) {
-              persistedDocuments.push(metadata);
-              continue;
-            }
-            const fileResponse = await fetch(dataUrl);
-            if (!fileResponse.ok) throw new Error('Could not read uploaded file ' + uploaded.fileName);
-            const blob = await fileResponse.blob();
-            const safeFileName = uploaded.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const safeFileId = uploaded.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-            const storagePath = authUser.id + '/' + saved.id + '/' + safeFileId + '-' + safeFileName;
-            const { error: uploadError } = await supabase.storage
-              .from('stepwise-documents')
-              .upload(storagePath, blob, {
-                contentType: blob.type || uploaded.fileType || 'application/pdf',
-                upsert: false,
-              });
-            if (uploadError) throw uploadError;
-            persistedDocuments.push({ ...metadata, storagePath });
-          }
-
-          const { error: documentsError } = await supabase.rpc('stepwise_student_attach_documents', {
-            p_request_id: saved.id,
-            p_documents: persistedDocuments,
-          });
-          if (documentsError) throw documentsError;
-          const { error: submissionAuditError } = await supabase.rpc('stepwise_student_record_submission', {
-            p_request_id: saved.id,
-          });
-          if (submissionAuditError) throw submissionAuditError;
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (!accessToken) throw new Error('Authentication required. Please sign in again.');
+        const response = await fetch('/api/requests', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            payload: {
+              serviceName: service.name,
+              serviceCode: service.code,
+              studentName: currentUser.name,
+              studentEmail: currentUser.email,
+              studentRoll: currentUser.institutionalId,
+              studentDepartment: currentUser.departmentId,
+              formData,
+              uploadedDocuments: uploadedDocuments.map(({ dataUrl: _dataUrl, ...metadata }) => metadata),
+            },
+          }),
+        });
+        const saved = await response.json();
+        if (!response.ok) throw new Error(saved.error || 'Request could not be saved.');
+        persistedDatabaseId = saved.id;
+        trackingRequestId = `SW-${new Date(saved.submitted_at).getFullYear()}-${String(saved.tracking_number).padStart(4, '0')}`;
+        setRequests((prev) => prev.map((request) => request.id === newId
+          ? { ...request, id: trackingRequestId, databaseId: saved.id, submittedAt: saved.submitted_at, updatedAt: saved.updated_at }
+          : request));
       } catch (error) {
-        console.error('StepWise request persistence failed:', error);
-        // Do not show a success screen when the database or document upload failed.
-        // If a row was created, preserve it so the student can find it after refreshing.
-        if (!savedRequestId) {
-          setRequests((prev) => prev.filter((request) => request.id === newId ? false : true));
-        } else {
-          const { error: partialSaveError } = await supabase.rpc('stepwise_student_attach_documents', {
-            p_request_id: savedRequestId,
-            p_documents: persistedDocuments,
-          });
-          if (partialSaveError) console.error('Could not save partial document metadata:', partialSaveError.message);
-        }
-        throw new Error(error instanceof Error ? error.message : 'Request could not be saved completely. Check My Requests before retrying.');
+        console.error('StepWise Neon request persistence failed:', error);
+        setRequests((prev) => prev.filter((request) => request.id !== newId));
+        throw new Error(error instanceof Error ? error.message : 'Request could not be saved. Please try again.');
       }
     }
 
