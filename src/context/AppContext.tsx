@@ -196,9 +196,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Restore real Supabase sessions when configured. Demo mode remains available only without configuration.
   useEffect(() => {
     if (!supabase) return;
+    const client = supabase;
     let mounted = true;
     const loadProfile = async (userId: string) => {
-      const { data, error } = await supabase.from('profiles').select('id, full_name, email, institutional_id, department, role, phone').eq('id', userId).maybeSingle();
+      const { data, error } = await client.from('profiles').select('id, full_name, email, institutional_id, department, role, phone').eq('id', userId).maybeSingle();
       if (!mounted) return;
       if (error || !data) {
         console.error('Unable to load StepWise profile:', error?.message || 'Profile not found');
@@ -223,13 +224,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       else if (mapped.role === 'ADMIN') setActiveTab('admin-dashboard');
       else setActiveTab('dashboard');
     };
-    supabase.auth.getSession().then(({ data, error }) => {
+    client.auth.getSession().then(({ data, error }) => {
       if (error) console.error('Session restore failed:', error.message);
       if (!mounted) return;
       if (data.session?.user) void loadProfile(data.session.user.id);
       else { setCurrentUser(null); setIsAuthenticated(false); }
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
       if (session?.user) {
         // Defer Supabase queries outside the auth callback to avoid lock contention.
@@ -245,9 +246,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Load persistent requests for the authenticated user; demo seed data is not mixed into real accounts.
   useEffect(() => {
     if (!supabase || !currentUser?.id) return;
+    const client = supabase;
     let cancelled = false;
     const loadRequests = async () => {
-      const { data, error } = await supabase.from('service_requests').select('*').order('submitted_at', { ascending: false });
+      const { data, error } = await client.from('service_requests').select('*').order('submitted_at', { ascending: false });
       if (cancelled) return;
       if (error) {
         console.error('Unable to load StepWise requests:', error.message);
@@ -285,8 +287,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setRequests(mapped);
       const requestIds = new Map(mapped.filter((item) => item.databaseId).map((item) => [item.databaseId!, item.id]));
       const [{ data: historyRows, error: historyError }, { data: notificationRows, error: notificationError }] = await Promise.all([
-        supabase.from('request_history').select('*').order('created_at', { ascending: false }),
-        supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+        client.from('request_history').select('*').order('created_at', { ascending: false }),
+        client.from('notifications').select('*').order('created_at', { ascending: false }),
       ]);
       if (cancelled) return;
       if (historyError) console.error('Unable to load request history:', historyError.message);
