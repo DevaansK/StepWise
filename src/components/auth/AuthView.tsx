@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Role } from '../../types';
+import { isSupabaseConfigured } from '../../lib/supabase';
 
 interface AuthViewProps {
   onLoginSuccess?: () => void;
@@ -33,8 +34,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   // Login form state
-  const [loginIdentifier, setLoginIdentifier] = useState('alex.chen@campus.edu');
-  const [loginPassword, setLoginPassword] = useState('password123');
+  const [loginIdentifier, setLoginIdentifier] = useState(isSupabaseConfigured ? '' : 'alex.chen@campus.edu');
+  const [loginPassword, setLoginPassword] = useState(isSupabaseConfigured ? '' : 'password123');
   const [loginError, setLoginError] = useState('');
 
   // Register form state
@@ -90,6 +91,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
   ];
 
   const handleDemoSelect = async (acc: (typeof demoAccounts)[0]) => {
+    if (isSupabaseConfigured) {
+      setLoginError('Demo accounts are disabled. Sign in with your registered StepWise account.');
+      return;
+    }
     setIsLoading(true);
     setLoginIdentifier(acc.email);
     setLoginPassword('password123');
@@ -150,8 +155,8 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
       setRegError('Student Roll Number or Institutional ID is required.');
       return;
     }
-    if (regPassword.length < 6) {
-      setRegError('Password must be at least 6 characters long.');
+    if (regPassword.length < (isSupabaseConfigured ? 8 : 6)) {
+      setRegError(isSupabaseConfigured ? 'Password must be at least 8 characters long.' : 'Password must be at least 6 characters long.');
       return;
     }
     if (regPassword !== regConfirmPassword) {
