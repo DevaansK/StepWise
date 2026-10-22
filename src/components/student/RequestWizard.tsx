@@ -154,7 +154,7 @@ export const RequestWizard: React.FC = () => {
   };
 
   // Final Submission
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (isSubmitting || !selectedService) return;
     setIsSubmitting(true);
 
