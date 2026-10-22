@@ -65,15 +65,15 @@ interface AppContextType {
     formData: Record<string, string>,
     uploadedDocuments: UploadedFile[]
   ) => Promise<ServiceRequest>;
-  verifyDocuments: (requestId: string, remarks: string, forwardToApprover: boolean) => void;
-  requestAdditionalInfo: (requestId: string, query: string) => void;
+  verifyDocuments: (requestId: string, remarks: string, forwardToApprover: boolean) => Promise<void>;
+  requestAdditionalInfo: (requestId: string, query: string) => Promise<void>;
   submitAdditionalInfo: (
     requestId: string,
     responseText: string,
     additionalFiles: UploadedFile[]
   ) => Promise<void>;
-  approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => void;
-  rejectRequest: (requestId: string, remarks: string) => void;
+  approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => Promise<void>;
+  rejectRequest: (requestId: string, remarks: string) => Promise<void>;
   completeRequest: (requestId: string, remarks?: string) => void;
 
   // Notification Operations
@@ -703,176 +703,106 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Staff: Verify Documents
-  const verifyDocuments = (requestId: string, remarks: string, forwardToApprover: boolean) => {
-    if (!currentUser) return;
+  const verifyDocuments = async (requestId: string, remarks: string, forwardToApprover: boolean): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required');
     const target = requests.find((r) => r.id === requestId);
-    if (!target) return;
+    if (!target) throw new Error('Request not found');
 
-    // Department Staff authorization check
-    if (
-      currentUser.role !== 'STAFF' &&
-      currentUser.role !== 'ADMIN'
-    ) {
-      alert('Unauthorized: Only department staff or administrators can verify documents.');
-      return;
+    if (currentUser.role !== 'STAFF' && currentUser.role !== 'ADMIN') {
+      throw new Error('Only department staff or administrators can verify documents.');
+    }
+    if (currentUser.role === 'STAFF' && target.assignedDepartmentId !== currentUser.departmentId) {
+      throw new Error('You can only verify requests belonging to your assigned department.');
     }
 
-    if (
-      currentUser.role === 'STAFF' &&
-      target.assignedDepartmentId !== currentUser.departmentId
-    ) {
-      alert('Unauthorized: You can only verify requests belonging to your assigned department.');
-      return;
-    }
-
-    if (supabase && target.databaseId) {
-      void supabase.rpc('stepwise_staff_update_request', {
+    // Persist the transition first. Never show a successful local state if the database rejects it.
+    if (supabase) {
+      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
+      const { error } = await supabase.rpc('stepwise_staff_update_request', {
         p_request_id: target.databaseId,
         p_action: forwardToApprover ? 'verify' : 'start_verification',
         p_comment: remarks || null,
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Server-side verification failed:', error.message);
-          window.alert('The server could not update this request. Refresh and try again.');
-        }
       });
+      if (error) throw new Error(error.message);
     }
+
     const now = new Date().toISOString();
     const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Under Verification';
+    setRequests((prev) => prev.map((r) => r.id === requestId
+      ? { ...r, status: newStatus, verificationRemarks: remarks,
+          assignedStaffId: currentUser.id, assignedStaffName: currentUser.name, updatedAt: now }
+      : r));
 
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: newStatus,
-              verificationRemarks: remarks,
-              assignedStaffId: currentUser.id,
-              assignedStaffName: currentUser.name,
-              updatedAt: now,
-            }
-          : r
-      )
-    );
-
-    const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`,
-      requestId,
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      action: forwardToApprover ? 'Documents Verified & Forwarded' : 'Documents Verified',
-      previousStatus: target.status,
-      newStatus,
-      remarks,
-      timestamp: now,
-    };
-    setHistories((prev) => [historyItem, ...prev]);
-
-    const notifStudent: Notification = {
-      id: `notif-${Date.now()}-1`,
-      recipientId: target.studentId,
-      requestId,
-      title: forwardToApprover ? 'Request Forwarded for Approval' : 'Documents Verified',
-      message: `Staff officer ${currentUser.name} verified your documents for ${requestId}. ${
-        forwardToApprover ? 'Forwarded to Approving Authority.' : ''
-      }`,
-      type: forwardToApprover ? 'forwarded' : 'verification',
-      createdAt: now,
-      isRead: false,
-    };
-
-    const notifApprover: Notification = {
-      id: `notif-${Date.now()}-2`,
-      recipientRole: 'APPROVER',
-      requestId,
-      title: 'Action Required: Request Ready for Decision',
-      message: `Request ${requestId} (${target.serviceName}) verified by ${currentUser.name} and awaiting your final endorsement.`,
-      type: 'forwarded',
-      createdAt: now,
-      isRead: false,
-    };
-
-    setNotifications((prev) => [notifStudent, notifApprover, ...prev]);
+    if (!supabase) {
+      const historyItem: RequestHistory = {
+        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
+        actorName: currentUser.name, actorRole: currentUser.role,
+        action: forwardToApprover ? 'Documents Verified & Forwarded' : 'Verification Started',
+        previousStatus: target.status, newStatus, remarks, timestamp: now,
+      };
+      setHistories((prev) => [historyItem, ...prev]);
+      const notifications: Notification[] = [{
+        id: `notif-${Date.now()}-1`, recipientId: target.studentId, requestId,
+        title: forwardToApprover ? 'Request Forwarded for Approval' : 'Verification Started',
+        message: `Staff officer ${currentUser.name} updated your request ${requestId}.`,
+        type: forwardToApprover ? 'forwarded' : 'verification', createdAt: now, isRead: false,
+      }];
+      if (forwardToApprover) notifications.push({
+        id: `notif-${Date.now()}-2`, recipientRole: 'APPROVER', requestId,
+        title: 'Action Required: Request Ready for Decision',
+        message: `Request ${requestId} (${target.serviceName}) is awaiting approval.`,
+        type: 'forwarded', createdAt: now, isRead: false,
+      });
+      setNotifications((prev) => [...notifications, ...prev]);
+    }
   };
 
   // Staff: Request Additional Information
-  const requestAdditionalInfo = (requestId: string, query: string) => {
-    if (!currentUser) return;
+  const requestAdditionalInfo = async (requestId: string, query: string): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required');
     const target = requests.find((r) => r.id === requestId);
-    if (!target) return;
-
-    if (
-      currentUser.role !== 'STAFF' &&
-      currentUser.role !== 'ADMIN'
-    ) {
-      alert('Unauthorized: Only department staff or administrators can request additional information.');
-      return;
+    if (!target) throw new Error('Request not found');
+    if (currentUser.role !== 'STAFF' && currentUser.role !== 'ADMIN') {
+      throw new Error('Only department staff or administrators can request additional information.');
     }
-
-    if (
-      currentUser.role === 'STAFF' &&
-      target.assignedDepartmentId !== currentUser.departmentId
-    ) {
-      alert('Unauthorized: You can only query requests belonging to your assigned department.');
-      return;
+    if (currentUser.role === 'STAFF' && target.assignedDepartmentId !== currentUser.departmentId) {
+      throw new Error('You can only query requests belonging to your assigned department.');
     }
+    if (!query.trim()) throw new Error('Please explain what information or document is missing.');
 
-    if (supabase && target.databaseId) {
-      void supabase.rpc('stepwise_staff_update_request', {
+    if (supabase) {
+      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
+      const { error } = await supabase.rpc('stepwise_staff_update_request', {
         p_request_id: target.databaseId,
         p_action: 'request_information',
         p_comment: query,
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Server-side information request failed:', error.message);
-          window.alert('The server could not update this request. Refresh and try again.');
-        }
       });
+      if (error) throw new Error(error.message);
     }
+
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Additional Information Required';
+    setRequests((prev) => prev.map((r) => r.id === requestId
+      ? { ...r, status: newStatus, additionalInfoQuery: query,
+          assignedStaffId: currentUser.id, assignedStaffName: currentUser.name, updatedAt: now }
+      : r));
 
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: newStatus,
-              additionalInfoQuery: query,
-              assignedStaffId: currentUser.id,
-              assignedStaffName: currentUser.name,
-              updatedAt: now,
-            }
-          : r
-      )
-    );
-
-    const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`,
-      requestId,
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      action: 'Additional Information Requested',
-      previousStatus: target.status,
-      newStatus,
-      remarks: `Officer query: "${query}"`,
-      timestamp: now,
-    };
-    setHistories((prev) => [historyItem, ...prev]);
-
-    const notif: Notification = {
-      id: `notif-${Date.now()}`,
-      recipientId: target.studentId,
-      requestId,
-      title: 'Action Needed: Additional Information Requested',
-      message: `Staff query for ${requestId}: "${query}". Please attach missing documents or clarifications.`,
-      type: 'info_required',
-      createdAt: now,
-      isRead: false,
-    };
-    setNotifications((prev) => [notif, ...prev]);
+    if (!supabase) {
+      const historyItem: RequestHistory = {
+        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
+        actorName: currentUser.name, actorRole: currentUser.role,
+        action: 'Additional Information Requested', previousStatus: target.status,
+        newStatus, remarks: `Officer query: "${query}"`, timestamp: now,
+      };
+      setHistories((prev) => [historyItem, ...prev]);
+      const notif: Notification = {
+        id: `notif-${Date.now()}`, recipientId: target.studentId, requestId,
+        title: 'Action Needed: Additional Information Requested',
+        message: `Staff query for ${requestId}: "${query}". Please attach missing documents or clarifications.`,
+        type: 'info_required', createdAt: now, isRead: false,
+      };
+      setNotifications((prev) => [notif, ...prev]);
+    }
   };
 
   // Student: Submit Additional Information / Documents
@@ -946,151 +876,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Approver: Approve Request
-  const approveRequest = (requestId: string, remarks: string, markCompleted = true) => {
-    if (!currentUser) return;
+  const approveRequest = async (requestId: string, remarks: string, markCompleted = true): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required');
     const target = requests.find((r) => r.id === requestId);
-    if (!target) return;
-
+    if (!target) throw new Error('Request not found');
     if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
-      alert('Unauthorized: Only authorized Approving Authorities can endorse requests.');
-      return;
+      throw new Error('Only authorized approving authorities can endorse requests.');
     }
 
-    if (supabase && target.databaseId) {
-      void (async () => {
-        const { error } = await supabase.rpc('stepwise_approver_decide', {
-          p_request_id: target.databaseId,
-          p_decision: 'approve',
-          p_comment: remarks || null,
+    if (supabase) {
+      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
+      const { error } = await supabase.rpc('stepwise_approver_decide', {
+        p_request_id: target.databaseId, p_decision: 'approve', p_comment: remarks || null,
+      });
+      if (error) throw new Error(error.message);
+      if (markCompleted) {
+        const { error: completeError } = await supabase.rpc('stepwise_complete_request', {
+          p_request_id: target.databaseId, p_comment: remarks || null,
         });
-        if (error) {
-          console.error('Server-side approval failed:', error.message);
-          window.alert('The server could not approve this request. Refresh and try again.');
-          return;
-        }
-        if (markCompleted) {
-          const { error: completeError } = await supabase.rpc('stepwise_complete_request', {
-            p_request_id: target.databaseId,
-            p_comment: remarks || null,
-          });
-          if (completeError) {
-            console.error('Request approved but completion failed:', completeError.message);
-            window.alert('Request approved, but could not be marked completed. Refresh and try again.');
-          }
-        }
-      })();
+        if (completeError) throw new Error('Request was approved, but completion failed: ' + completeError.message);
+      }
     }
+
     const now = new Date().toISOString();
     const newStatus: RequestStatus = markCompleted ? 'Completed' : 'Approved';
+    setRequests((prev) => prev.map((r) => r.id === requestId
+      ? { ...r, status: newStatus, decisionRemarks: remarks,
+          approverId: currentUser.id, approverName: currentUser.name, updatedAt: now }
+      : r));
 
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: newStatus,
-              decisionRemarks: remarks,
-              approverId: currentUser.id,
-              approverName: currentUser.name,
-              updatedAt: now,
-            }
-          : r
-      )
-    );
-
-    const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`,
-      requestId,
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      action: markCompleted ? 'Approved & Issued Certificate' : 'Request Endorsed / Approved',
-      previousStatus: target.status,
-      newStatus,
-      remarks: remarks || 'Endorsed and approved according to university guidelines.',
-      timestamp: now,
-    };
-    setHistories((prev) => [historyItem, ...prev]);
-
-    const notif: Notification = {
-      id: `notif-${Date.now()}`,
-      recipientId: target.studentId,
-      requestId,
-      title: 'Request Approved & Completed!',
-      message: `Your request ${requestId} (${target.serviceName}) has been approved by ${currentUser.name}. You may now view or download your official stamped document.`,
-      type: 'completion',
-      createdAt: now,
-      isRead: false,
-    };
-    setNotifications((prev) => [notif, ...prev]);
+    if (!supabase) {
+      const historyItem: RequestHistory = {
+        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
+        actorName: currentUser.name, actorRole: currentUser.role,
+        action: markCompleted ? 'Approved & Issued Certificate' : 'Request Endorsed / Approved',
+        previousStatus: target.status, newStatus,
+        remarks: remarks || 'Endorsed and approved according to university guidelines.', timestamp: now,
+      };
+      setHistories((prev) => [historyItem, ...prev]);
+      const notif: Notification = {
+        id: `notif-${Date.now()}`, recipientId: target.studentId, requestId,
+        title: markCompleted ? 'Request Approved & Completed!' : 'Request Approved',
+        message: `Your request ${requestId} (${target.serviceName}) was approved by ${currentUser.name}.`,
+        type: markCompleted ? 'completion' : 'approval', createdAt: now, isRead: false,
+      };
+      setNotifications((prev) => [notif, ...prev]);
+    }
   };
 
   // Approver: Reject Request
-  const rejectRequest = (requestId: string, remarks: string) => {
-    if (!currentUser) return;
+  const rejectRequest = async (requestId: string, remarks: string): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required');
     const target = requests.find((r) => r.id === requestId);
-    if (!target) return;
-
+    if (!target) throw new Error('Request not found');
     if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
-      alert('Unauthorized: Only authorized Approving Authorities can reject requests.');
-      return;
+      throw new Error('Only authorized approving authorities can reject requests.');
+    }
+    if (!remarks.trim()) throw new Error('A comment is required when rejecting a request.');
+
+    if (supabase) {
+      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
+      const { error } = await supabase.rpc('stepwise_approver_decide', {
+        p_request_id: target.databaseId, p_decision: 'reject', p_comment: remarks,
+      });
+      if (error) throw new Error(error.message);
     }
 
-    if (supabase && target.databaseId) {
-      void supabase.rpc('stepwise_approver_decide', {
-        p_request_id: target.databaseId,
-        p_decision: 'reject',
-        p_comment: remarks,
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Server-side rejection failed:', error.message);
-          window.alert('The server could not reject this request. Refresh and try again.');
-        }
-      });
-    }
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Rejected';
+    setRequests((prev) => prev.map((r) => r.id === requestId
+      ? { ...r, status: newStatus, decisionRemarks: remarks,
+          approverId: currentUser.id, approverName: currentUser.name, updatedAt: now }
+      : r));
 
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: newStatus,
-              decisionRemarks: remarks,
-              approverId: currentUser.id,
-              approverName: currentUser.name,
-              updatedAt: now,
-            }
-          : r
-      )
-    );
-
-    const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`,
-      requestId,
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      action: 'Request Rejected',
-      previousStatus: target.status,
-      newStatus,
-      remarks: remarks || 'Does not fulfill academic or administrative eligibility requirements.',
-      timestamp: now,
-    };
-    setHistories((prev) => [historyItem, ...prev]);
-
-    const notif: Notification = {
-      id: `notif-${Date.now()}`,
-      recipientId: target.studentId,
-      requestId,
-      title: 'Request Decision: Rejected',
-      message: `Your request ${requestId} was rejected by ${currentUser.name}. Reason: ${remarks}`,
-      type: 'rejection',
-      createdAt: now,
-      isRead: false,
-    };
-    setNotifications((prev) => [notif, ...prev]);
+    if (!supabase) {
+      const historyItem: RequestHistory = {
+        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
+        actorName: currentUser.name, actorRole: currentUser.role,
+        action: 'Request Rejected', previousStatus: target.status, newStatus,
+        remarks, timestamp: now,
+      };
+      setHistories((prev) => [historyItem, ...prev]);
+      const notif: Notification = {
+        id: `notif-${Date.now()}`, recipientId: target.studentId, requestId,
+        title: 'Request Decision: Rejected',
+        message: `Your request ${requestId} was rejected by ${currentUser.name}. Reason: ${remarks}`,
+        type: 'rejection', createdAt: now, isRead: false,
+      };
+      setNotifications((prev) => [notif, ...prev]);
+    }
   };
 
   // Complete Request
