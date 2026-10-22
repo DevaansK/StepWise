@@ -48,7 +48,18 @@ export default async function handler(req: any, res: any) {
     });
     const reply = response.text?.trim();
     if (!reply) return res.status(502).json({ error: 'The AI assistant returned an empty response.' });
-    return res.status(200).json({ reply, relatedServiceId: null, source: 'gemini-2.5-flash', isDemoMode: false });
+    const lower = (message + ' ' + reply).toLowerCase();
+    let relatedServiceId: string | null = null;
+    if (lower.includes('bonafide')) relatedServiceId = 'srv-bonafide';
+    else if (lower.includes('transcript')) relatedServiceId = 'srv-transcript';
+    else if (lower.includes('fee receipt') || lower.includes('fee statement')) relatedServiceId = 'srv-fee';
+    else if (lower.includes('id card') || lower.includes('identity card')) relatedServiceId = 'srv-id-card';
+    else if (lower.includes('hostel') || lower.includes('outpass')) relatedServiceId = 'srv-hostel';
+    else if (lower.includes('leave')) relatedServiceId = 'srv-leave';
+    else if (lower.includes('no-dues') || lower.includes('no dues')) relatedServiceId = 'srv-nodues';
+    else if (lower.includes('address') || lower.includes('contact')) relatedServiceId = 'srv-address';
+
+    return res.status(200).json({ reply, relatedServiceId, source: 'gemini-2.5-flash', isDemoMode: false });
   } catch (error) {
     console.error('StepWise assistant request failed:', error);
     return res.status(502).json({ error: 'The AI assistant is temporarily unavailable. Please try again.' });
