@@ -577,6 +577,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // intentionally not sent as data URLs; private file storage needs a separate bucket/policy.
     if (supabase) {
       void (async () => {
+        let savedRequestId: string | null = null;
+        const persistedDocuments: Record<string, unknown>[] = [];
         try {
           const { data: authData } = await supabase.auth.getUser();
           const authUser = authData.user;
@@ -584,8 +586,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const { data: dbService, error: serviceError } = await supabase
             .from('services').select('id,name,department').eq('name', service.name).maybeSingle();
           if (serviceError || !dbService) throw new Error(serviceError?.message || 'Service is not configured in the database');
-          let savedRequestId: string | null = null;
-          const persistedDocuments: Record<string, unknown>[] = [];
           const { data: saved, error } = await supabase.from('service_requests').insert({
             student_id: authUser.id,
             service_id: dbService.id,
