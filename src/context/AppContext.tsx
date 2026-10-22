@@ -866,6 +866,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           additionalDocuments: [...(r.additionalDocuments || []), ...additionalFiles], updatedAt: now }
       : r));
 
+    if (!supabase) {
     const historyItem: RequestHistory = {
       id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
       actorName: currentUser.name, actorRole: currentUser.role,
@@ -881,6 +882,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       type: 'verification', createdAt: now, isRead: false,
     };
     setNotifications((prev) => [notif, ...prev]);
+    }
   };
 
   // Approver: Approve Request
