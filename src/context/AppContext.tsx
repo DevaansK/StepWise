@@ -283,6 +283,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       });
       setRequests(mapped);
+      const requestIds = new Map(mapped.filter((item) => item.databaseId).map((item) => [item.databaseId!, item.id]));
+      const [{ data: historyRows, error: historyError }, { data: notificationRows, error: notificationError }] = await Promise.all([
+        supabase.from('request_history').select('*').order('created_at', { ascending: false }),
+        supabase.from('notifications').select('*').order('created_at', { ascending: false }),
+      ]);
+      if (cancelled) return;
+      if (historyError) console.error('Unable to load request history:', historyError.message);
+      else setHistories((historyRows || []).map((row: any) => ({
+        id: row.id,
+        requestId: requestIds.get(row.request_id) || row.request_id,
+        actorId: row.changed_by || '',
+        actorName: row.changed_by === currentUser.id ? currentUser.name : 'StepWise Staff',
+        actorRole: row.changed_by === currentUser.id ? currentUser.role : 'STAFF',
+        action: row.new_status === 'pending_approval' ? 'Documents Verified & Forwarded' : 'Request Status Updated',
+        previousStatus: statusMap[row.old_status] || 'Draft',
+        newStatus: statusMap[row.new_status] || 'Submitted',
+        remarks: row.comment || '',
+        timestamp: row.created_at,
+      })));
+      if (notificationError) console.error('Unable to load notifications:', notificationError.message);
+      else setNotifications((notificationRows || []).map((row: any) => ({
+        id: row.id,
+        recipientId: row.user_id,
+        requestId: requestIds.get(row.request_id) || row.request_id || undefined,
+        title: row.title,
+        message: row.message,
+        type: /reject/i.test(row.title) ? 'rejection' : /approv|completed/i.test(row.title) ? 'approval' : /information/i.test(row.title) ? 'info_required' : 'submission',
+        createdAt: row.created_at,
+        isRead: Boolean(row.read_at),
+      })));
     };
     void loadRequests();
     return () => { cancelled = true; };
