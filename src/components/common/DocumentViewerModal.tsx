@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Download, FileText, CheckCircle2, Shield, Calendar, HardDrive } from 'lucide-react';
 import { UploadedFile } from '../../types';
+import { supabase } from '../../lib/supabase';
 
 interface DocumentViewerModalProps {
   isOpen: boolean;
@@ -17,6 +18,36 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   studentName = 'Alex Chen',
   studentRoll = 'CS-2023-042',
 }) => {
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [loadingDocument, setLoadingDocument] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setDocumentUrl(file?.dataUrl || null);
+    setLoadingDocument(false);
+
+    if (!isOpen || !file?.storagePath || file.dataUrl || !supabase) {
+      return () => { active = false; };
+    }
+
+    setLoadingDocument(true);
+    void supabase.storage
+      .from('stepwise-documents')
+      .createSignedUrl(file.storagePath, 60)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error('Unable to access stored document:', error.message);
+          setDocumentUrl(null);
+        } else {
+          setDocumentUrl(data.signedUrl);
+        }
+        setLoadingDocument(false);
+      });
+
+    return () => { active = false; };
+  }, [isOpen, file?.storagePath, file?.dataUrl]);
+
   if (!isOpen || !file) return null;
 
   const formattedSize = (file.fileSize / 1024).toFixed(1) + ' KB';
@@ -94,17 +125,25 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               </div>
             </div>
 
-            {/* Simulated file visual preview */}
-            <div className="border border-dashed border-slate-300 rounded-lg p-6 bg-slate-50/50 flex flex-col items-center justify-center text-center space-y-2">
-              <Shield className="w-10 h-10 text-indigo-600/70" />
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-slate-800">
-                  {file.fileName}
-                </p>
-                <p className="text-[11px] text-slate-500 max-w-sm">
-                  Document scanned and encrypted using StepWise Document Security Engine. Available for staff inspection and OCR review.
-                </p>
-              </div>
+            {/* Render the actual private upload when available. */}
+            <div className="w-full min-h-[260px] rounded-lg border border-slate-200 bg-white overflow-hidden flex items-center justify-center">
+              {loadingDocument ? (
+                <div className="p-8 text-sm text-slate-500">Loading private document…</div>
+              ) : documentUrl && (file.previewType === 'image' || file.fileType.startsWith('image/')) ? (
+                <img src={documentUrl} alt={file.fileName} className="max-h-[480px] max-w-full object-contain" />
+              ) : documentUrl && (file.previewType === 'pdf' || file.fileType.includes('pdf')) ? (
+                <iframe src={documentUrl} title={file.fileName} className="w-full h-[480px]" />
+              ) : documentUrl ? (
+                <a href={documentUrl} target="_blank" rel="noreferrer" className="p-8 text-sm font-medium text-indigo-700 underline">
+                  Open {file.fileName}
+                </a>
+              ) : (
+                <div className="p-8 text-center space-y-2">
+                  <Shield className="w-10 h-10 text-indigo-600/70 mx-auto" />
+                  <p className="text-sm font-semibold text-slate-800">{file.fileName}</p>
+                  <p className="text-xs text-slate-500">The stored file is unavailable in this session. Verify that the upload completed and that your account has permission to view it.</p>
+                </div>
+              )}
             </div>
 
             {/* Timestamps */}
@@ -122,18 +161,21 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
         {/* Footer actions */}
         <div className="flex items-center justify-between px-6 py-3.5 border-t border-slate-100 bg-white">
           <p className="text-xs text-slate-500">
-            * Demonstration file simulation stored in browser environment.
+            {documentUrl ? 'Private document link expires after 60 seconds.' : 'Private document access is unavailable until the file is uploaded.'}
           </p>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                alert(`Simulated download: "${file.fileName}" (${formattedSize})`);
-              }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors"
+            <a
+              href={documentUrl || undefined}
+              download={file.fileName}
+              target="_blank"
+              rel="noreferrer"
+              aria-disabled={!documentUrl}
+              onClick={(event) => { if (!documentUrl) event.preventDefault(); }}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium border rounded-lg transition-colors ${documentUrl ? 'text-slate-700 bg-slate-100 hover:bg-slate-200 border-slate-200' : 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'}`}
             >
               <Download className="w-3.5 h-3.5" />
               <span>Download File</span>
-            </button>
+            </a>
             <button
               onClick={onClose}
               className="px-4 py-1.5 text-xs font-medium text-white bg-indigo-900 hover:bg-indigo-950 rounded-lg transition-colors"
