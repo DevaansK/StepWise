@@ -636,14 +636,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             p_documents: persistedDocuments,
           });
           if (documentsError) throw documentsError;
-          const { error: historyError } = await supabase.from('request_history').insert({
-            request_id: saved.id,
-            changed_by: authUser.id,
-            old_status: 'draft',
-            new_status: 'submitted',
-            comment: 'Request submitted for ' + service.name,
+          const { error: submissionAuditError } = await supabase.rpc('stepwise_student_record_submission', {
+            p_request_id: saved.id,
           });
-          if (historyError) console.error('Request saved but history could not be recorded:', historyError.message);
+          if (submissionAuditError) throw submissionAuditError;
       } catch (error) {
         console.error('StepWise request persistence failed:', error);
         // Do not show a success screen when the database or document upload failed.
