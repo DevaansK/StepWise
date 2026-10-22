@@ -584,7 +584,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const { data: dbService, error: serviceError } = await supabase
             .from('services').select('id,name,department').eq('name', service.name).maybeSingle();
           if (serviceError || !dbService) throw new Error(serviceError?.message || 'Service is not configured in the database');
-          const safeDocuments = uploadedDocuments.map(({ dataUrl: _dataUrl, ...doc }) => doc);
+          let savedRequestId: string | null = null;
+          const persistedDocuments: Record<string, unknown>[] = [];
           const { data: saved, error } = await supabase.from('service_requests').insert({
             student_id: authUser.id,
             service_id: dbService.id,
@@ -597,13 +598,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             student_roll: currentUser.institutionalId,
             student_department: currentUser.departmentId,
             form_data: formData,
-            uploaded_documents: safeDocuments,
+            uploaded_documents: [],
             assigned_department_id: dbService.department,
           }).select('id,tracking_number').single();
           if (error) throw error;
+          savedRequestId = saved.id;
           setRequests((prev) => prev.map((request) => request.id === newId
             ? { ...request, databaseId: saved.id }
             : request));
+
+          for (const uploaded of uploadedDocuments) {
+            const { dataUrl, ...metadata } = uploaded;
+            if (!dataUrl) {
+              persistedDocuments.push(metadata);
+              continue;
+            }
+            const fileResponse = await fetch(dataUrl);
+            if (!fileResponse.ok) throw new Error('Could not read uploaded file ' + uploaded.fileName);
+            const blob = await fileResponse.blob();
+            const safeFileName = uploaded.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const storagePath = authUser.id + '/' + saved.id + '/' + uploaded.id + '-' + safeFileName;
+            const { error: uploadError } = await supabase.storage
+              .from('stepwise-documents')
+              .upload(storagePath, blob, {
+                contentType: uploaded.fileType || blob.type || 'application/pdf',
+                upsert: false,
+              });
+            if (uploadError) throw uploadError;
+            persistedDocuments.push({ ...metadata, storagePath });
+          }
+
+          const { error: documentsError } = await supabase
+            .from('service_requests')
+            .update({ uploaded_documents: persistedDocuments })
+            .eq('id', saved.id);
+          if (documentsError) throw documentsError;
           const { error: historyError } = await supabase.from('request_history').insert({
             request_id: saved.id,
             changed_by: authUser.id,
@@ -613,9 +642,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
           if (historyError) console.error('Request saved but history could not be recorded:', historyError.message);
         } catch (error) {
-          console.error('StepWise request was not saved to Supabase:', error);
-          window.alert('The request could not be saved to the server. Please try again before leaving this page.');
-          setRequests((prev) => prev.filter((request) => request.id !== newId));
+          console.error('StepWise request persistence failed:', error);
+          window.alert('Your request may have been saved, but a document or database update failed. Refresh your requests before trying again.');
+          // Keep the local request when the database row was created; removing it would
+          // hide a server-side request that may already exist.
+          if (!savedRequestId) {
+            setRequests((prev) => prev.filter((request) => request.id !== newId));
+          } else {
+            const { error: partialSaveError } = await supabase
+              .from('service_requests')
+              .update({ uploaded_documents: persistedDocuments })
+              .eq('id', savedRequestId);
+            if (partialSaveError) console.error('Could not save partial document metadata:', partialSaveError.message);
+          }
         }
       })();
     }
