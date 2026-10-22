@@ -87,6 +87,8 @@ export interface UploadedFile {
   uploadedAt: string;
   previewType?: 'pdf' | 'image' | 'generic';
   dataUrl?: string;
+  /** Private Supabase Storage object path for real, persisted uploads. */
+  storagePath?: string;
 }
 
 export interface ServiceRequest {
