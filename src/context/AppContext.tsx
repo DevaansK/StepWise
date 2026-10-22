@@ -628,10 +628,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             persistedDocuments.push({ ...metadata, storagePath });
           }
 
-          const { error: documentsError } = await supabase
-            .from('service_requests')
-            .update({ uploaded_documents: persistedDocuments })
-            .eq('id', saved.id);
+          const { error: documentsError } = await supabase.rpc('stepwise_student_attach_documents', {
+            p_request_id: saved.id,
+            p_documents: persistedDocuments,
+          });
           if (documentsError) throw documentsError;
           const { error: historyError } = await supabase.from('request_history').insert({
             request_id: saved.id,
@@ -649,10 +649,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (!savedRequestId) {
             setRequests((prev) => prev.filter((request) => request.id !== newId));
           } else {
-            const { error: partialSaveError } = await supabase
-              .from('service_requests')
-              .update({ uploaded_documents: persistedDocuments })
-              .eq('id', savedRequestId);
+            const { error: partialSaveError } = await supabase.rpc('stepwise_student_attach_documents', {
+              p_request_id: savedRequestId,
+              p_documents: persistedDocuments,
+            });
             if (partialSaveError) console.error('Could not save partial document metadata:', partialSaveError.message);
           }
         }
