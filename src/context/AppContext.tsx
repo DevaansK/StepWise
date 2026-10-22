@@ -738,7 +738,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
     const now = new Date().toISOString();
-    const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Verified';
+    const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Under Verification';
 
     setRequests((prev) =>
       prev.map((r) =>
