@@ -535,11 +535,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Request Creation (Central source of truth)
-  const createRequest = (
+  const createRequest = async (
     serviceId: string,
     formData: Record<string, string>,
     uploadedDocuments: UploadedFile[]
-  ): ServiceRequest => {
+  ): Promise<ServiceRequest> => {
     if (!currentUser) throw new Error('Authentication required');
     const service = services.find((s) => s.id === serviceId);
     if (!service) throw new Error('Service not found');
@@ -549,6 +549,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const formattedSeq = String(nextSeq).padStart(4, '0');
     const newId = `SW-2026-${formattedSeq}`;
     const now = new Date().toISOString();
+    let trackingRequestId = newId;
+    let persistedDatabaseId: string | undefined;
 
     const newRequest: ServiceRequest = {
       id: newId,
@@ -576,10 +578,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Persist to Supabase when real authentication is configured. Document bytes are
     // intentionally not sent as data URLs; private file storage needs a separate bucket/policy.
     if (supabase) {
-      void (async () => {
-        let savedRequestId: string | null = null;
-        const persistedDocuments: Record<string, unknown>[] = [];
-        try {
+      let savedRequestId: string | null = null;
+      const persistedDocuments: Record<string, unknown>[] = [];
+      try {
           const { data: authData } = await supabase.auth.getUser();
           const authUser = authData.user;
           if (!authUser) throw new Error('Authentication required');
@@ -600,11 +601,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             form_data: formData,
             uploaded_documents: [],
             assigned_department_id: dbService.department,
-          }).select('id,tracking_number').single();
+          }).select('id,tracking_number,submitted_at').single();
           if (error) throw error;
           savedRequestId = saved.id;
+          persistedDatabaseId = saved.id;
+          trackingRequestId = `SW-${new Date(saved.submitted_at).getFullYear()}-${String(saved.tracking_number).padStart(4, '0')}`;
           setRequests((prev) => prev.map((request) => request.id === newId
-            ? { ...request, databaseId: saved.id }
+            ? { ...request, id: trackingRequestId, databaseId: saved.id }
             : request));
 
           for (const uploaded of uploadedDocuments) {
@@ -642,28 +645,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             comment: 'Request submitted for ' + service.name,
           });
           if (historyError) console.error('Request saved but history could not be recorded:', historyError.message);
-        } catch (error) {
-          console.error('StepWise request persistence failed:', error);
-          window.alert('Your request may have been saved, but a document or database update failed. Refresh your requests before trying again.');
-          // Keep the local request when the database row was created; removing it would
-          // hide a server-side request that may already exist.
-          if (!savedRequestId) {
-            setRequests((prev) => prev.filter((request) => request.id !== newId));
-          } else {
-            const { error: partialSaveError } = await supabase.rpc('stepwise_student_attach_documents', {
-              p_request_id: savedRequestId,
-              p_documents: persistedDocuments,
-            });
-            if (partialSaveError) console.error('Could not save partial document metadata:', partialSaveError.message);
-          }
+      } catch (error) {
+        console.error('StepWise request persistence failed:', error);
+        // Do not show a success screen when the database or document upload failed.
+        // If a row was created, preserve it so the student can find it after refreshing.
+        if (!savedRequestId) {
+          setRequests((prev) => prev.filter((request) => request.id === newId ? false : true));
+        } else {
+          const { error: partialSaveError } = await supabase.rpc('stepwise_student_attach_documents', {
+            p_request_id: savedRequestId,
+            p_documents: persistedDocuments,
+          });
+          if (partialSaveError) console.error('Could not save partial document metadata:', partialSaveError.message);
         }
-      })();
+        throw new Error(error instanceof Error ? error.message : 'Request could not be saved completely. Check My Requests before retrying.');
+      }
     }
 
     // Create history event
     const historyEvent: RequestHistory = {
       id: `hist-${Date.now()}`,
-      requestId: newId,
+      requestId: trackingRequestId,
       actorId: currentUser.id,
       actorName: currentUser.name,
       actorRole: currentUser.role,
@@ -679,9 +681,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const studentNotif: Notification = {
       id: `notif-${Date.now()}-1`,
       recipientId: currentUser.id,
-      requestId: newId,
+      requestId: trackingRequestId,
       title: 'Request Submitted Successfully',
-      message: `Your request ${newId} for "${service.name}" has been received and routed to ${service.departmentId.toUpperCase()}.`,
+      message: `Your request ${trackingRequestId} for "${service.name}" has been received and routed to ${service.departmentId.toUpperCase()}.`,
       type: 'submission',
       createdAt: now,
       isRead: false,
@@ -692,7 +694,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recipientRole: 'STAFF',
       requestId: newId,
       title: 'New Service Request Queued',
-      message: `A new request ${newId} (${service.name}) from ${currentUser.name} is ready for document verification.`,
+      message: `A new request ${trackingRequestId} (${service.name}) from ${currentUser.name} is ready for document verification.`,
       type: 'submission',
       createdAt: now,
       isRead: false,
@@ -700,7 +702,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setNotifications((prev) => [studentNotif, staffNotif, ...prev]);
 
-    return newRequest;
+    return { ...newRequest, id: trackingRequestId, databaseId: persistedDatabaseId };
   };
 
   // Staff: Verify Documents
