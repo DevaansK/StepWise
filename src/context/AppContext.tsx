@@ -878,16 +878,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (supabase && target.databaseId) {
-      void supabase.rpc('stepwise_approver_decide', {
-        p_request_id: target.databaseId,
-        p_decision: 'approve',
-        p_comment: remarks || null,
-      }).then(({ error }) => {
+      void (async () => {
+        const { error } = await supabase.rpc('stepwise_approver_decide', {
+          p_request_id: target.databaseId,
+          p_decision: 'approve',
+          p_comment: remarks || null,
+        });
         if (error) {
           console.error('Server-side approval failed:', error.message);
           window.alert('The server could not approve this request. Refresh and try again.');
+          return;
         }
-      });
+        if (markCompleted) {
+          const { error: completeError } = await supabase.rpc('stepwise_complete_request', {
+            p_request_id: target.databaseId,
+            p_comment: remarks || null,
+          });
+          if (completeError) {
+            console.error('Request approved but completion failed:', completeError.message);
+            window.alert('Request approved, but could not be marked completed. Refresh and try again.');
+          }
+        }
+      })();
     }
     const now = new Date().toISOString();
     const newStatus: RequestStatus = markCompleted ? 'Completed' : 'Approved';
