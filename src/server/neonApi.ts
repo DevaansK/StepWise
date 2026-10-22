@@ -130,7 +130,12 @@ router.post('/requests', async (req, res) => {
     const documents = Array.isArray(payload.uploadedDocuments)
       ? payload.uploadedDocuments.map((doc: Record<string, unknown>) => {
           const { dataUrl: _dataUrl, ...metadata } = doc || {};
-          return metadata;
+          const rawName = typeof metadata.fileName === 'string' ? metadata.fileName : 'document';
+          const safeName = rawName.replace(/^.*[\\/]/, '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+          return {
+            ...metadata,
+            fileName: safeName,
+          };
         })
       : [];
     const description = Object.entries(formData).map(([key, value]) => `${key}: ${String(value)}`).join('\n');

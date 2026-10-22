@@ -47,6 +47,7 @@ export interface ServiceRequiredDocument {
   acceptedFormats: string[]; // e.g. ['PDF', 'JPG', 'PNG']
   maxSizeMB: number;
 }
+export type RequiredDocument = ServiceRequiredDocument;
 
 export interface ServiceFormField {
   id: string;
@@ -152,4 +153,5 @@ export interface ChatMessage {
   timestamp: string;
   relatedServiceId?: string | null;
   isDemoMode?: boolean;
+  source?: string;
 }

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Role } from '../../types';
+import { TEAM_MEMBERS } from '../../config/teamConfig';
 
 interface TopNavProps {
   onToggleMobileSidebar: () => void;
@@ -69,25 +70,25 @@ export const TopNav: React.FC<TopNavProps> = ({ onToggleMobileSidebar }) => {
       role: 'STUDENT',
       label: 'Student',
       desc: 'Browse, submit requests & track',
-      userName: 'Alex Chen (CS-2023-042)',
+      userName: `${TEAM_MEMBERS.student.name} (${TEAM_MEMBERS.student.institutionalId})`,
     },
     {
       role: 'STAFF',
       label: 'Department Staff',
       desc: 'Verify files & query info',
-      userName: 'Dr. Meera Patel (Academic Affairs)',
+      userName: `${TEAM_MEMBERS.staff.name} (Academic Affairs)`,
     },
     {
       role: 'APPROVER',
       label: 'Approving Authority',
       desc: 'Dean final sign-off & endorsement',
-      userName: 'Prof. Robert Vance (Dean)',
+      userName: `${TEAM_MEMBERS.approver.name} (Dean)`,
     },
     {
       role: 'ADMIN',
       label: 'System Admin',
       desc: 'Manage catalog, workflows & analytics',
-      userName: 'Sarah Jenkins (Registrar)',
+      userName: `${TEAM_MEMBERS.admin.name} (Registrar)`,
     },
   ];
 

@@ -20,6 +20,7 @@ import {
 } from '../data/mockData';
 import { hashPassword, DEFAULT_PASSWORD_HASH, DEFAULT_DEMO_PASSWORD } from '../utils/crypto';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { validateMandatoryDocuments } from '../utils/fileValidation';
 import {
   supabaseSignIn,
   supabaseSignUp,
@@ -151,7 +152,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.error(e);
     }
-    return INITIAL_USERS[0]; // Alex Chen, Student
+    return INITIAL_USERS[0]; // Default Student Lead
   });
 
   // Shared requests dataset (Central Single Source of Truth)
@@ -449,6 +450,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) throw new Error('Authentication required');
     const service = services.find((s) => s.id === serviceId);
     if (!service) throw new Error('Service not found');
+
+    // Strict validation: Verify all mandatory documents are attached
+    const docValidation = validateMandatoryDocuments(service, uploadedDocuments);
+    if (!docValidation.valid) {
+      throw new Error(`Cannot submit request: Missing mandatory document(s): ${docValidation.missing.join(', ')}`);
+    }
 
     // Generate unique human-readable ID: e.g. SW-2026-0011
     const nextSeq = requests.length + 1;

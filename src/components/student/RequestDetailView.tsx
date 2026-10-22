@@ -22,6 +22,7 @@ import { DocumentViewerModal } from '../common/DocumentViewerModal';
 import { GeneratedCertificateModal } from '../common/GeneratedCertificateModal';
 import { UploadedFile, RequestStatus } from '../../types';
 import { uploadDocumentToStorage } from '../../services/backendApi';
+import { validateDocumentFile, sanitizeFileName } from '../../utils/fileValidation';
 
 export const RequestDetailView: React.FC = () => {
   const {
@@ -86,13 +87,31 @@ export const RequestDetailView: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Reset input value to allow reselection
+    e.target.value = '';
+
+    const validation = await validateDocumentFile(file, {
+      id: 'doc-additional-response',
+      name: 'Supplemental Document',
+      description: 'Additional documentation requested by department staff',
+      mandatory: true,
+      acceptedFormats: ['PDF', 'JPG', 'PNG'],
+      maxSizeMB: 10,
+    });
+
+    if (!validation.valid) {
+      alert(validation.error || 'Invalid file format or size.');
+      return;
+    }
+
+    const safeName = sanitizeFileName(file.name);
     const uploadRes = await uploadDocumentToStorage(file, request.id, 'additional_doc');
 
     const newFile: UploadedFile = {
       id: `add-up-${Date.now()}`,
       docId: 'doc-additional-response',
       docName: 'Supplemental Document / Clarification',
-      fileName: file.name,
+      fileName: safeName,
       fileSize: file.size,
       fileType: file.type || 'application/pdf',
       uploadedAt: new Date().toISOString(),

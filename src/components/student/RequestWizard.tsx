@@ -18,6 +18,11 @@ import {
 import { useApp } from '../../context/AppContext';
 import { Service, UploadedFile, ServiceRequest } from '../../types';
 import { uploadDocumentToStorage } from '../../services/backendApi';
+import {
+  validateDocumentFile,
+  validateMandatoryDocuments,
+  sanitizeFileName,
+} from '../../utils/fileValidation';
 
 export const RequestWizard: React.FC = () => {
   const {
@@ -82,23 +87,39 @@ export const RequestWizard: React.FC = () => {
     if (!selectedService) return false;
     const errors: Record<string, string> = {};
 
-    selectedService.requiredDocuments.forEach((doc) => {
-      if (doc.mandatory) {
-        const hasDoc = uploadedFiles.some((f) => f.docId === doc.id);
-        if (!hasDoc) {
-          errors[doc.id] = `Mandatory document "${doc.name}" is missing.`;
-        }
+    const { missing } = validateMandatoryDocuments(selectedService, uploadedFiles);
+    for (const doc of selectedService.requiredDocuments) {
+      if (doc.mandatory && missing.includes(doc.name)) {
+        errors[doc.id] = `Mandatory document "${doc.name}" is missing. Please attach a valid file.`;
       }
-    });
+    }
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // File upload with Supabase Storage support
+  // File upload with Supabase Storage support and format/size verification
   const handleFileUpload = async (docId: string, docName: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Reset file input value to allow re-uploading corrected files
+    event.target.value = '';
+
+    const docRule = selectedService?.requiredDocuments.find((d) => d.id === docId);
+    if (docRule) {
+      const validation = await validateDocumentFile(file, docRule);
+      if (!validation.valid) {
+        setFormErrors((prev) => ({
+          ...prev,
+          [docId]: validation.error || 'Invalid file format or size.',
+        }));
+        return;
+      }
+    }
+
+    // Clean filename
+    const safeName = sanitizeFileName(file.name);
 
     // Upload to storage or generate local dataUrl
     const uploadRes = await uploadDocumentToStorage(file, 'draft', docId);
@@ -107,7 +128,7 @@ export const RequestWizard: React.FC = () => {
       id: `up-${Date.now()}`,
       docId,
       docName,
-      fileName: file.name,
+      fileName: safeName,
       fileSize: file.size,
       fileType: file.type || 'application/pdf',
       uploadedAt: new Date().toISOString(),
@@ -521,9 +542,10 @@ export const RequestWizard: React.FC = () => {
                         ) : (
                           <label className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg cursor-pointer transition-colors shadow-2xs">
                             <Upload className="w-3.5 h-3.5" />
-                            <span>Select Sample File</span>
+                            <span>Upload Document</span>
                             <input
                               type="file"
+                              accept={doc.acceptedFormats.map((f) => '.' + f.toLowerCase()).join(',')}
                               className="hidden"
                               onChange={(e) => handleFileUpload(doc.id, doc.name, e)}
                             />

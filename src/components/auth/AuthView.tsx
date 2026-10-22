@@ -19,6 +19,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { Role } from '../../types';
 import { isSupabaseConfigured } from '../../lib/supabase';
+import { TEAM_MEMBERS } from '../../config/teamConfig';
 
 interface AuthViewProps {
   onLoginSuccess?: () => void;
@@ -34,7 +35,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   // Login form state
-  const [loginIdentifier, setLoginIdentifier] = useState(isSupabaseConfigured ? '' : 'alex.chen@campus.edu');
+  const [loginIdentifier, setLoginIdentifier] = useState(isSupabaseConfigured ? '' : TEAM_MEMBERS.student.email);
   const [loginPassword, setLoginPassword] = useState(isSupabaseConfigured ? '' : 'password123');
   const [loginError, setLoginError] = useState('');
 
@@ -58,33 +59,33 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
   }[] = [
     {
       role: 'STUDENT',
-      name: 'Alex Chen',
-      id: 'CS-2023-042',
-      email: 'alex.chen@campus.edu',
+      name: TEAM_MEMBERS.student.name,
+      id: TEAM_MEMBERS.student.institutionalId,
+      email: TEAM_MEMBERS.student.email,
       label: 'Student',
       desc: 'Submit requests & track',
     },
     {
       role: 'STAFF',
-      name: 'Dr. Meera Patel',
-      id: 'EMP-ACAD-204',
-      email: 'm.patel@campus.edu',
+      name: TEAM_MEMBERS.staff.name,
+      id: TEAM_MEMBERS.staff.institutionalId,
+      email: TEAM_MEMBERS.staff.email,
       label: 'Staff Officer',
       desc: 'Verify files & query info',
     },
     {
       role: 'APPROVER',
-      name: 'Prof. Robert Vance',
-      id: 'EXEC-DEAN-001',
-      email: 'dean.academic@campus.edu',
+      name: TEAM_MEMBERS.approver.name,
+      id: TEAM_MEMBERS.approver.institutionalId,
+      email: TEAM_MEMBERS.approver.email,
       label: 'Dean Approver',
       desc: 'Executive sign-off & seal',
     },
     {
       role: 'ADMIN',
-      name: 'Sarah Jenkins',
-      id: 'ADM-SYS-99',
-      email: 'admin.registrar@campus.edu',
+      name: TEAM_MEMBERS.admin.name,
+      id: TEAM_MEMBERS.admin.institutionalId,
+      email: TEAM_MEMBERS.admin.email,
       label: 'Administrator',
       desc: 'Catalogue & analytics',
     },
@@ -349,7 +350,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
                 {!isSupabaseConfigured && <button
                   type="button"
                   onClick={() => {
-                    setLoginIdentifier('alex.chen@campus.edu');
+                    setLoginIdentifier(TEAM_MEMBERS.student.email);
                     setLoginPassword('password123');
                   }}
                   className="text-[11px] text-indigo-700 hover:underline"

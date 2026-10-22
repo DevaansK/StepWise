@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Printer, ShieldCheck, Award, QrCode } from 'lucide-react';
 import { ServiceRequest } from '../../types';
+import { TEAM_MEMBERS } from '../../config/teamConfig';
 
 interface GeneratedCertificateModalProps {
   isOpen: boolean;
@@ -162,11 +163,11 @@ export const GeneratedCertificateModal: React.FC<GeneratedCertificateModalProps>
               {/* Dean Signature */}
               <div className="text-right flex flex-col items-end">
                 <div className="font-serif italic text-lg font-bold text-indigo-950 pr-2">
-                  Robert Vance
+                  {request.approverName || TEAM_MEMBERS.approver.name}
                 </div>
                 <div className="w-36 border-b border-slate-400 mb-1" />
                 <p className="text-xs font-bold text-slate-900 leading-tight">
-                  {request.approverName || 'Prof. Robert Vance'}
+                  {request.approverName || TEAM_MEMBERS.approver.name}
                 </p>
                 <p className="text-[11px] text-slate-500">
                   Dean of Academic Affairs

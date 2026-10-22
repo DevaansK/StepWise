@@ -324,16 +324,15 @@ DECLARE
   v_dept_id TEXT;
   v_name TEXT;
 BEGIN
-  -- Default to STUDENT role unless explicitly authorized
-  v_role := COALESCE(new.raw_user_meta_data->>'role', 'STUDENT');
-  IF v_role NOT IN ('STUDENT', 'STAFF', 'APPROVER', 'ADMIN') THEN
-    v_role := 'STUDENT';
-  END IF;
-
-  -- Default name and institutional ID
+-- Default name and institutional ID
   v_name := COALESCE(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1));
   v_inst_id := COALESCE(new.raw_user_meta_data->>'institutionalId', 'ID-' || substr(md5(random()::text), 1, 8));
   v_dept_id := COALESCE(new.raw_user_meta_data->>'departmentId', 'dept-acad');
+
+  -- SECURITY ENFORCEMENT: Public self-registration ALWAYS creates a STUDENT profile.
+  -- Privileged accounts (STAFF, APPROVER, ADMIN) cannot be self-assigned via public signup metadata.
+  -- They must be provisioned by an Administrator using provision_privileged_user() or direct SQL.
+  v_role := 'STUDENT';
 
   INSERT INTO public.profiles (
     id,
@@ -369,6 +368,45 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 -- ------------------------------------------------------------------------------
+-- 11b. PRIVILEGED USER PROVISIONING (ADMIN ONLY)
+-- ------------------------------------------------------------------------------
+-- Secure procedure to promote an existing user to STAFF, APPROVER, or ADMIN.
+-- Can only be executed by authenticated administrators.
+CREATE OR REPLACE FUNCTION public.provision_privileged_user(
+  target_user_id UUID,
+  new_role TEXT,
+  new_department_id TEXT DEFAULT 'dept-acad',
+  new_designation TEXT DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Verify caller has ADMIN role in profiles
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'ADMIN'
+  ) THEN
+    RAISE EXCEPTION 'Access Denied: Only administrators can provision privileged accounts.';
+  END IF;
+
+  IF new_role NOT IN ('STAFF', 'APPROVER', 'ADMIN') THEN
+    RAISE EXCEPTION 'Invalid privileged role: %. Allowed: STAFF, APPROVER, ADMIN', new_role;
+  END IF;
+
+  UPDATE public.profiles
+  SET
+    role = new_role,
+    department_id = COALESCE(new_department_id, department_id),
+    designation = COALESCE(new_designation, designation),
+    updated_at = now()
+  WHERE id = target_user_id;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
 -- 12. STORAGE BUCKET CONFIGURATION FOR SUPPORTING DOCUMENTS
 -- ------------------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public)
@@ -393,7 +431,7 @@ CREATE POLICY "Users can update their own documents"
 -- ------------------------------------------------------------------------------
 INSERT INTO public.departments (id, name, code, office_location, contact_email, lead_name, icon_name)
 VALUES
-  ('dept-acad', 'Department of Academic Affairs & Records', 'ACAD', 'Administration Building B, Room 102', 'academic.records@campus.edu', 'Dr. Meera Patel', 'GraduationCap'),
+  ('dept-acad', 'Department of Academic Affairs & Records', 'ACAD', 'Administration Building B, Room 102', 'academic.records@campus.edu', 'Academic Verification Lead', 'GraduationCap'),
   ('dept-exam', 'Controller of Examinations Office', 'EXAM', 'Examination Tower, 2nd Floor', 'examinations@campus.edu', 'Dr. Arthur Pendelton', 'FileCheck2'),
   ('dept-fin', 'Finance & Student Accounts Office', 'FIN', 'Central Administrative Block, Wing 1, Room 14', 'accounts@campus.edu', 'Marcus Vance', 'Receipt'),
   ('dept-sec', 'Campus Security & Identity Services', 'SEC', 'Security HQ, Main Gate Complex', 'security.id@campus.edu', 'Officer David Miller', 'BadgeCheck'),

@@ -1,6 +1,7 @@
 import React from 'react';
 import { User, Shield, Building, Mail, Phone, RotateCcw, CheckCircle, Sparkles, LogOut } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { TEAM_MEMBERS } from '../../config/teamConfig';
 
 export const ProfileView: React.FC = () => {
   const { currentUser, departments, switchRole, resetToDefaultData, setIsWalkthroughOpen, logout } =
@@ -89,7 +90,7 @@ export const ProfileView: React.FC = () => {
             }`}
           >
             <span className="block font-semibold">Student</span>
-            <span className="text-[10px] text-slate-500">Alex Chen</span>
+            <span className="text-[10px] text-slate-500">{TEAM_MEMBERS.student.name}</span>
           </button>
 
           <button
@@ -101,7 +102,7 @@ export const ProfileView: React.FC = () => {
             }`}
           >
             <span className="block font-semibold">Staff Officer</span>
-            <span className="text-[10px] text-slate-500">Dr. Meera Patel</span>
+            <span className="text-[10px] text-slate-500">{TEAM_MEMBERS.staff.name}</span>
           </button>
 
           <button
@@ -113,7 +114,7 @@ export const ProfileView: React.FC = () => {
             }`}
           >
             <span className="block font-semibold">Dean Approver</span>
-            <span className="text-[10px] text-slate-500">Prof. Robert Vance</span>
+            <span className="text-[10px] text-slate-500">{TEAM_MEMBERS.approver.name}</span>
           </button>
 
           <button
@@ -125,7 +126,7 @@ export const ProfileView: React.FC = () => {
             }`}
           >
             <span className="block font-semibold">System Admin</span>
-            <span className="text-[10px] text-slate-500">Sarah Jenkins</span>
+            <span className="text-[10px] text-slate-500">{TEAM_MEMBERS.admin.name}</span>
           </button>
         </div>
       </div>

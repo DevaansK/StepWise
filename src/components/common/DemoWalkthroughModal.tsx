@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, CheckCircle, ArrowRight, RotateCcw, UserCheck, Shield, Sparkles, FileText } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { TEAM_MEMBERS } from '../../config/teamConfig';
 
 export const DemoWalkthroughModal: React.FC = () => {
   const {
@@ -63,7 +64,7 @@ export const DemoWalkthroughModal: React.FC = () => {
                       Student Applies for Bonafide Certificate
                     </h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Log in as <strong>Alex Chen</strong>. Browse Services &gt; click &quot;Start Request&quot; on Bonafide Certificate &gt; enter purpose &gt; attach student ID &amp; fee receipt &gt; Submit to get unique ID.
+                      Log in as <strong>{TEAM_MEMBERS.student.name}</strong>. Browse Services &gt; click &quot;Start Request&quot; on Bonafide Certificate &gt; enter purpose &gt; attach student ID &amp; fee receipt &gt; Submit to get unique ID.
                     </p>
                   </div>
                 </div>
@@ -91,7 +92,7 @@ export const DemoWalkthroughModal: React.FC = () => {
                       Department Staff Verifies Documents
                     </h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Switch to <strong>Dr. Meera Patel</strong> (Academic Affairs). Open request <code className="text-indigo-600 font-mono">SW-2026-0004</code> &gt; inspect documents in viewer &gt; click &quot;Verify Documents &amp; Forward to Dean&quot;.
+                      Switch to <strong>{TEAM_MEMBERS.staff.name}</strong> (Academic Affairs). Open request <code className="text-indigo-600 font-mono">SW-2026-0004</code> &gt; inspect documents in viewer &gt; click &quot;Verify Documents &amp; Forward to Dean&quot;.
                     </p>
                   </div>
                 </div>
@@ -119,7 +120,7 @@ export const DemoWalkthroughModal: React.FC = () => {
                       Approving Authority Endorses Request
                     </h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Switch to <strong>Prof. Robert Vance</strong> (Dean). Review verified request in Pending Approvals &gt; enter decision remarks &gt; click &quot;Approve &amp; Issue Certificate&quot;.
+                      Switch to <strong>{TEAM_MEMBERS.approver.name}</strong> (Dean). Review verified request in Pending Approvals &gt; enter decision remarks &gt; click &quot;Approve &amp; Issue Certificate&quot;.
                     </p>
                   </div>
                 </div>
@@ -147,7 +148,7 @@ export const DemoWalkthroughModal: React.FC = () => {
                       Student Tracks Timeline &amp; Views Certificate
                     </h5>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Switch back to <strong>Alex Chen</strong>. Notification received! Open My Requests &gt; view complete vertical tracking timeline &gt; click &quot;View / Print Official Certificate&quot;.
+                      Switch back to <strong>{TEAM_MEMBERS.student.name}</strong>. Notification received! Open My Requests &gt; view complete vertical tracking timeline &gt; click &quot;View / Print Official Certificate&quot;.
                     </p>
                   </div>
                 </div>
@@ -177,7 +178,7 @@ export const DemoWalkthroughModal: React.FC = () => {
                   Pre-configured Query: Academic Transcript (SW-2026-0003)
                 </h5>
                 <p className="text-[11px] text-amber-800 mt-0.5">
-                  Staff requested a missing Library Clearance slip. As student Alex Chen, open the request, upload the document in the response box, and click &quot;Resubmit Information&quot; to restore status to <em>Under Verification</em>.
+                  Staff requested a missing Library Clearance slip. As student {TEAM_MEMBERS.student.name}, open the request, upload the document in the response box, and click &quot;Resubmit Information&quot; to restore status to <em>Under Verification</em>.
                 </p>
               </div>
               <button

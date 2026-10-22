@@ -152,15 +152,15 @@ To run locally with Supabase connected:
 Verify all 4 institutional roles and backend flows:
 
 ### 1. Student Workflow
-- [x] Register a new student account (`alex.test@campus.edu`).
+- [x] Register a new student account (`student.test@campus.edu`).
 - [x] Verify that self-registration strictly assigns the `STUDENT` role (privilege escalation blocked).
 - [x] Navigate to **Browse Services** and select **Bonafide Certificate**.
-- [x] Complete form fields and attach PDF/image documents (uploaded to `stepwise-documents` bucket).
+- [x] Complete form fields and attach valid PDF/JPG documents (validated against service requirements).
 - [x] Submit request and observe generated ID (`SW-2026-XXXX`).
 - [x] Check **My Requests** to verify the request is recorded in `Submitted` status.
 
 ### 2. Department Staff Workflow
-- [x] Log in as **Dr. Meera Patel** (Academic Affairs Staff) using the quick-switcher or credentials.
+- [x] Log in as **Staff Verification Officer** (Academic Affairs Staff) using credentials or demo switcher.
 - [x] Open **Assigned Queue** to view the student's submitted request.
 - [x] Test **Request Additional Information**: enter a query; verify status updates to `Additional Information Required`.
 - [x] Switch back to Student: notice in-app notification, upload supplemental response file, and click Resubmit.
@@ -168,14 +168,14 @@ Verify all 4 institutional roles and backend flows:
 - [x] Status updates to `Pending Approval`.
 
 ### 3. Approving Authority Workflow
-- [x] Log in as **Prof. Robert Vance** (Dean of Academic Affairs).
+- [x] Log in as **Dean of Academic Affairs** (Approving Authority).
 - [x] Open **Pending Approvals** queue.
 - [x] Inspect request details, verified document checklist, and staff notes.
 - [x] Click **Approve & Sign Certificate** with official remarks.
 - [x] Switch to Student: click **View / Print Official Certificate** to verify the digital institutional seal, QR code, and Dean's endorsement.
 
 ### 4. Admin Workflow
-- [x] Log in as **Sarah Jenkins** (Administrator).
+- [x] Log in as **System Administrator / Registrar**.
 - [x] View institutional analytics across all departments and average processing times.
 - [x] View **All College Requests** with cross-department filters.
 - [x] Test **Manage Services**: toggle service active/inactive status or create a new service.
@@ -188,3 +188,41 @@ Verify all 4 institutional roles and backend flows:
 - **Student Privacy:** Students can only read/query their own records (`student_id = auth.uid()`).
 - **Staff Privacy:** Department staff can only access requests assigned to their department.
 - **Audit Trails:** Every status transition, remark, and actor is appended to `public.request_histories` as an immutable audit record.
+
+---
+
+## 7. Privileged Role Provisioning (Staff, Approver, Admin)
+
+Public registration strictly provisions accounts with the **`STUDENT`** role only. To provision privileged institutional accounts:
+
+### Method A: Via Supabase SQL Editor (Recommended for Administrators)
+1. Have the staff member or faculty member sign up with their official college email.
+2. In the Supabase Dashboard > **SQL Editor**, run the provided provisioning function or SQL statement:
+
+```sql
+-- Promote an existing user to Department Staff
+UPDATE public.profiles
+SET 
+  role = 'STAFF',
+  department_id = 'dept-acad',
+  designation = 'Senior Academic Verification Officer'
+WHERE email = 'staff.member@campus.edu';
+
+-- Promote a faculty member to Approving Authority (Dean)
+UPDATE public.profiles
+SET 
+  role = 'APPROVER',
+  department_id = 'dept-acad',
+  designation = 'Dean of Academic Affairs'
+WHERE email = 'dean.member@campus.edu';
+
+-- Promote a user to System Administrator
+UPDATE public.profiles
+SET 
+  role = 'ADMIN',
+  designation = 'University Systems Administrator'
+WHERE email = 'admin.member@campus.edu';
+```
+
+### Method B: Via In-App Administrator Role Procedure
+Authenticated administrators can call the security-definer function `public.provision_privileged_user(target_user_id, 'STAFF', 'dept-acad', 'Officer')` directly.
