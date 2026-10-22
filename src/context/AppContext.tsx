@@ -145,6 +145,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Shared requests dataset (Central Single Source of Truth)
   const [requests, setRequests] = useState<ServiceRequest[]>(() => {
+    if (isSupabaseConfigured) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
       if (saved) return JSON.parse(saved);
@@ -165,6 +166,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [histories, setHistories] = useState<RequestHistory[]>(() => {
+    if (isSupabaseConfigured) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.HISTORIES);
       if (saved) return JSON.parse(saved);
@@ -175,6 +177,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [notifications, setNotifications] = useState<Notification[]>(() => {
+    if (isSupabaseConfigured) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
       if (saved) return JSON.parse(saved);
@@ -238,6 +241,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     return () => { mounted = false; listener.subscription.unsubscribe(); };
   }, []);
+
+  // Load persistent requests for the authenticated user; demo seed data is not mixed into real accounts.
+  useEffect(() => {
+    if (!supabase || !currentUser?.id) return;
+    let cancelled = false;
+    const loadRequests = async () => {
+      const { data, error } = await supabase.from('service_requests').select('*').order('submitted_at', { ascending: false });
+      if (cancelled) return;
+      if (error) {
+        console.error('Unable to load StepWise requests:', error.message);
+        return;
+      }
+      const statusMap: Record<string, RequestStatus> = {
+        draft: 'Draft', submitted: 'Submitted', under_verification: 'Under Verification',
+        additional_information_required: 'Additional Information Required', verified: 'Verified',
+        pending_approval: 'Pending Approval', approved: 'Approved', rejected: 'Rejected', completed: 'Completed',
+      };
+      const mapped: ServiceRequest[] = (data || []).map((row: any) => {
+        const service = services.find((item) => item.name === row.service_name || item.code === row.service_code);
+        return {
+          id: 'SW-' + new Date(row.submitted_at || Date.now()).getFullYear() + '-' + String(row.tracking_number).padStart(4, '0'),
+          databaseId: row.id,
+          studentId: row.student_id,
+          studentName: row.student_name || currentUser.name,
+          studentEmail: row.student_email || currentUser.email,
+          studentRoll: row.student_roll || currentUser.institutionalId,
+          studentDepartment: row.student_department || currentUser.departmentId,
+          serviceId: service?.id || row.service_id,
+          serviceName: row.service_name || service?.name || 'College Service',
+          serviceCode: row.service_code || service?.code || '',
+          formData: row.form_data || {},
+          uploadedDocuments: row.uploaded_documents || [],
+          status: statusMap[row.status] || 'Submitted',
+          assignedDepartmentId: row.assigned_department_id || service?.departmentId || '',
+          assignedStaffId: row.assigned_staff_id || undefined,
+          approverId: row.assigned_approver_id || service?.approverId || '',
+          submittedAt: row.submitted_at,
+          updatedAt: row.updated_at,
+          verificationRemarks: row.staff_comments || undefined,
+        };
+      });
+      setRequests(mapped);
+    };
+    void loadRequests();
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
 
   // Sync demo-only state to localStorage; real sessions are managed by Supabase Auth.
   useEffect(() => {
@@ -323,11 +372,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (supabase) {
       if (!password) return { success: false, error: 'Password is required.' };
       let email = cleanId;
-      if (!cleanId.includes('@')) {
-        const { data: profile, error: lookupError } = await supabase.from('profiles').select('email').ilike('institutional_id', cleanId).maybeSingle();
-        if (lookupError || !profile?.email) return { success: false, error: 'No account found with this institutional email or ID.' };
-        email = profile.email;
-      }
+      if (!cleanId.includes('@')) return { success: false, error: 'Please sign in using your registered email address.' };
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { success: false, error: error.message };
       return { success: true };
