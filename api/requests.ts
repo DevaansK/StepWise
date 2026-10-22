@@ -1,8 +1,10 @@
 type JsonRecord = Record<string, unknown>;
 
+// Vercel may expose the same public Supabase settings under VITE_* names
+// because the frontend uses Vite. Prefer server-side names, then fall back.
 const config = () => ({
-  url: process.env.SUPABASE_URL?.replace(/\/$/, ''),
-  anonKey: process.env.SUPABASE_ANON_KEY,
+  url: (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL)?.replace(/\/$/, ''),
+  anonKey: process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY,
 });
 
 function sendError(res: any, status: number, message: string) {
