@@ -64,7 +64,7 @@ interface AppContextType {
     serviceId: string,
     formData: Record<string, string>,
     uploadedDocuments: UploadedFile[]
-  ) => ServiceRequest;
+  ) => Promise<ServiceRequest>;
   verifyDocuments: (requestId: string, remarks: string, forwardToApprover: boolean) => void;
   requestAdditionalInfo: (requestId: string, query: string) => void;
   submitAdditionalInfo: (
