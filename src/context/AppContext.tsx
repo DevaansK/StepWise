@@ -74,7 +74,7 @@ interface AppContextType {
   ) => Promise<void>;
   approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => Promise<void>;
   rejectRequest: (requestId: string, remarks: string) => Promise<void>;
-  completeRequest: (requestId: string, remarks?: string) => void;
+  completeRequest: (requestId: string, remarks?: string) => Promise<void>;
 
   // Notification Operations
   markNotificationAsRead: (id: string) => void;
@@ -971,49 +971,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Complete Request
-  const completeRequest = (requestId: string, remarks = 'Marked completed by administrator') => {
-    if (!currentUser) return;
+  const completeRequest = async (requestId: string, remarks = 'Marked completed by administrator'): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required');
     const target = requests.find((r) => r.id === requestId);
-    if (!target) return;
+    if (!target) throw new Error('Request not found');
 
-    if (supabase && target.databaseId) {
-      void supabase.rpc('stepwise_complete_request', {
+    if (supabase) {
+      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
+      const { error } = await supabase.rpc('stepwise_complete_request', {
         p_request_id: target.databaseId,
         p_comment: remarks,
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Server-side completion failed:', error.message);
-          window.alert('The server could not complete this request. Refresh and try again.');
-        }
       });
+      if (error) throw new Error(error.message);
     }
 
     const now = new Date().toISOString();
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: 'Completed',
-              updatedAt: now,
-            }
-          : r
-      )
-    );
+    setRequests((prev) => prev.map((r) => r.id === requestId ? { ...r, status: 'Completed', updatedAt: now } : r));
 
-    const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`,
-      requestId,
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      action: 'Workflow Marked Completed',
-      previousStatus: target.status,
-      newStatus: 'Completed',
-      remarks,
-      timestamp: now,
-    };
-    setHistories((prev) => [historyItem, ...prev]);
+    if (!supabase) {
+      const historyItem: RequestHistory = {
+        id: 'hist-' + Date.now(),
+        requestId,
+        actorId: currentUser.id,
+        actorName: currentUser.name,
+        actorRole: currentUser.role,
+        action: 'Workflow Marked Completed',
+        previousStatus: target.status,
+        newStatus: 'Completed',
+        remarks,
+        timestamp: now,
+      };
+      setHistories((prev) => [historyItem, ...prev]);
+    }
   };
 
   // Notification actions
