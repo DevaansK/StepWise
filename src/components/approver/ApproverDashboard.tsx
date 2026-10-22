@@ -71,30 +71,40 @@ export const ApproverDashboard: React.FC = () => {
     }
   }, [selectedRequest?.id, currentUser?.name]);
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!selectedRequest) return;
     if (!decisionRemarks.trim()) {
       alert('Mandatory: Please enter decision remarks.');
       return;
     }
     setIsProcessing(true);
-    approveRequest(selectedRequest.id, decisionRemarks, true);
-    setIsProcessing(false);
-    alert(`Request ${selectedRequest.id} has been Approved and Issued! Certificate is now generated.`);
-    setSelectedRequest(null);
+    try {
+      await approveRequest(selectedRequest.id, decisionRemarks, true);
+      alert(`Request ${selectedRequest.id} has been approved and issued. Certificate is now generated.`);
+      setSelectedRequest(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'The request could not be approved. Refresh and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (!selectedRequest) return;
     if (!decisionRemarks.trim()) {
       alert('Mandatory: Please provide a clear justification for rejection.');
       return;
     }
     setIsProcessing(true);
-    rejectRequest(selectedRequest.id, decisionRemarks);
-    setIsProcessing(false);
-    alert(`Request ${selectedRequest.id} has been rejected with justification.`);
-    setSelectedRequest(null);
+    try {
+      await rejectRequest(selectedRequest.id, decisionRemarks);
+      alert(`Request ${selectedRequest.id} has been rejected with justification.`);
+      setSelectedRequest(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'The request could not be rejected. Refresh and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
