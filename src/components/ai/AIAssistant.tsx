@@ -105,22 +105,12 @@ How can I help you today? Choose one of the suggested prompts below or ask any q
         if (found) setSelectedServiceContext(found);
       }
     } catch (err) {
-      console.error(err);
-      // Fallback deterministic response in case server call failed
-      const fallbackReply = `### StepWise College Service Procedures
-
-Here are the standard steps for college administrative requests:
-1. **Browse Service Directory**: Locate the appropriate institutional service.
-2. **Review Checklist**: Ensure all mandatory documents (ID Card scan, Fee receipt, or Clearance slips) are gathered.
-3. **Submit Online**: Fill in required fields to obtain your unique tracking ID.
-4. **Verification & Approval**: Department officers verify records and forward to the authorized approving authority.
-
-*Note: For specialized advice, visit the respective department counter or check Browse Services.*`;
-
+      console.error('StepWise assistant request failed:', err);
+      const fallbackReply = 'The AI assistant could not reach its backend. Please check the deployment configuration and try again.';
       setMessages((prev) => [
         ...prev,
         {
-          id: `ai-${Date.now()}`,
+          id: `ai-error-${Date.now()}`,
           sender: 'assistant',
           text: fallbackReply,
           timestamp: new Date().toISOString(),
