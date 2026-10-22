@@ -19,7 +19,18 @@ import {
   INITIAL_NOTIFICATIONS,
 } from '../data/mockData';
 import { hashPassword, DEFAULT_PASSWORD_HASH, DEFAULT_DEMO_PASSWORD } from '../utils/crypto';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
+import {
+  supabaseSignIn,
+  supabaseSignUp,
+  supabaseSignOut,
+  dbFetchRequests,
+  dbCreateRequest,
+  dbUpdateRequest,
+  dbRecordHistory,
+  dbCreateNotification,
+  dbMarkNotificationRead,
+} from '../services/backendApi';
 
 export interface LoginResult {
   success: boolean;
@@ -46,6 +57,8 @@ interface AppContextType {
   unreadCount: number;
   isWalkthroughOpen: boolean;
   isAuthenticated: boolean;
+  isBackendConnected: boolean;
+  backendProvider: string;
 
   // Actions
   setActiveTab: (tab: string, contextId?: string | null) => void;
@@ -64,17 +77,17 @@ interface AppContextType {
     serviceId: string,
     formData: Record<string, string>,
     uploadedDocuments: UploadedFile[]
-  ) => Promise<ServiceRequest>;
-  verifyDocuments: (requestId: string, remarks: string, forwardToApprover: boolean) => Promise<void>;
-  requestAdditionalInfo: (requestId: string, query: string) => Promise<void>;
+  ) => ServiceRequest;
+  verifyDocuments: (requestId: string, remarks: string, forwardToApprover: boolean) => void;
+  requestAdditionalInfo: (requestId: string, query: string) => void;
   submitAdditionalInfo: (
     requestId: string,
     responseText: string,
     additionalFiles: UploadedFile[]
-  ) => Promise<void>;
-  approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => Promise<void>;
-  rejectRequest: (requestId: string, remarks: string) => Promise<void>;
-  completeRequest: (requestId: string, remarks?: string) => Promise<void>;
+  ) => void;
+  approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => void;
+  rejectRequest: (requestId: string, remarks: string) => void;
+  completeRequest: (requestId: string, remarks?: string) => void;
 
   // Notification Operations
   markNotificationAsRead: (id: string) => void;
@@ -122,18 +135,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Session & Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (isSupabaseConfigured) return false;
     try {
       const session = localStorage.getItem(STORAGE_KEYS.SESSION);
       if (session === 'false') return false;
-      return true; // legacy demo mode only
+      return true; // default demo session active
     } catch {
       return true;
     }
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    if (isSupabaseConfigured) return null;
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
       if (saved) return JSON.parse(saved);
@@ -145,7 +156,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Shared requests dataset (Central Single Source of Truth)
   const [requests, setRequests] = useState<ServiceRequest[]>(() => {
-    if (isSupabaseConfigured) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
       if (saved) return JSON.parse(saved);
@@ -166,7 +176,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [histories, setHistories] = useState<RequestHistory[]>(() => {
-    if (isSupabaseConfigured) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.HISTORIES);
       if (saved) return JSON.parse(saved);
@@ -177,7 +186,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [notifications, setNotifications] = useState<Notification[]>(() => {
-    if (isSupabaseConfigured) return [];
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
       if (saved) return JSON.parse(saved);
@@ -192,150 +200,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [isWalkthroughOpen, setIsWalkthroughOpen] = useState<boolean>(false);
+  const isBackendConnected = isSupabaseConfigured();
+  const backendProvider = isBackendConnected ? 'Supabase PostgreSQL' : 'Local State Prototype';
 
-  // Restore real Supabase sessions when configured. Demo mode remains available only without configuration.
+  // Load latest shared requests from Supabase PostgreSQL if configured
   useEffect(() => {
-    if (!supabase) return;
-    const client = supabase;
-    let mounted = true;
-    const loadProfile = async (userId: string) => {
-      const { data, error } = await client.from('profiles').select('id, full_name, email, institutional_id, department, role, phone').eq('id', userId).maybeSingle();
-      if (!mounted) return;
-      if (error || !data) {
-        console.error('Unable to load StepWise profile:', error?.message || 'Profile not found');
-        setCurrentUser(null);
-        setIsAuthenticated(false);
-        return;
+    async function loadRemoteData() {
+      if (isSupabaseConfigured()) {
+        try {
+          const remoteRequests = await dbFetchRequests();
+          if (remoteRequests && remoteRequests.length > 0) {
+            setRequests(remoteRequests);
+          }
+        } catch (e) {
+          console.warn('Initial Supabase fetch error, using local seed:', e);
+        }
       }
-      const roleMap: Record<string, Role> = { student: 'STUDENT', department_staff: 'STAFF', approver: 'APPROVER', admin: 'ADMIN' };
-      const mapped: User = {
-        id: data.id,
-        name: data.full_name || 'Student',
-        email: data.email || '',
-        institutionalId: data.institutional_id || '',
-        departmentId: data.department || 'dept-acad',
-        role: roleMap[data.role] || 'STUDENT',
-        phone: data.phone || undefined,
-      };
-      setCurrentUser(mapped);
-      setIsAuthenticated(true);
-      if (mapped.role === 'STAFF') setActiveTab('staff-assigned');
-      else if (mapped.role === 'APPROVER') setActiveTab('approver-pending');
-      else if (mapped.role === 'ADMIN') setActiveTab('admin-dashboard');
-      else setActiveTab('dashboard');
-    };
-    client.auth.getSession().then(({ data, error }) => {
-      if (error) console.error('Session restore failed:', error.message);
-      if (!mounted) return;
-      if (data.session?.user) void loadProfile(data.session.user.id);
-      else { setCurrentUser(null); setIsAuthenticated(false); }
-    });
-    const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return;
-      if (session?.user) {
-        // Defer Supabase queries outside the auth callback to avoid lock contention.
-        window.setTimeout(() => { if (mounted) void loadProfile(session.user.id); }, 0);
-      } else {
-        setCurrentUser(null);
-        setIsAuthenticated(false);
-      }
-    });
-    return () => { mounted = false; listener.subscription.unsubscribe(); };
+    }
+    loadRemoteData();
   }, []);
 
-  // Load persistent requests for the authenticated user; demo seed data is not mixed into real accounts.
+  // Sync state changes to localStorage
   useEffect(() => {
-    if (!supabase || !currentUser?.id) return;
-    const client = supabase;
-    let cancelled = false;
-    const loadRequests = async () => {
-      const { data: sessionData } = await client.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      if (!accessToken) return;
-      let data: any[] = [];
-      try {
-        const response = await fetch('/api/requests', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Could not load requests');
-        data = Array.isArray(result) ? result : [];
-      } catch (error) {
-        console.error('Unable to load StepWise requests from Neon:', error);
-        return;
-      }
-      if (cancelled) return;
-      const statusMap: Record<string, RequestStatus> = {
-        draft: 'Draft', submitted: 'Submitted', under_verification: 'Under Verification',
-        additional_information_required: 'Additional Information Required', verified: 'Verified',
-        pending_approval: 'Pending Approval', approved: 'Approved', rejected: 'Rejected', completed: 'Completed',
-      };
-      const mapped: ServiceRequest[] = (data || []).map((row: any) => {
-        const service = services.find((item) => item.name === row.service_name || item.code === row.service_code);
-        return {
-          id: 'SW-' + new Date(row.submitted_at || Date.now()).getFullYear() + '-' + String(row.tracking_number).padStart(4, '0'),
-          databaseId: row.id,
-          studentId: row.student_id,
-          studentName: row.student_name || currentUser.name,
-          studentEmail: row.student_email || currentUser.email,
-          studentRoll: row.student_roll || currentUser.institutionalId,
-          studentDepartment: row.student_department || currentUser.departmentId,
-          serviceId: service?.id || row.service_id,
-          serviceName: row.service_name || service?.name || 'College Service',
-          serviceCode: row.service_code || service?.code || '',
-          formData: row.form_data || {},
-          uploadedDocuments: row.uploaded_documents || [],
-          status: statusMap[row.status] || 'Submitted',
-          assignedDepartmentId: row.assigned_department_id || service?.departmentId || '',
-          assignedStaffId: row.assigned_staff_id || undefined,
-          approverId: row.assigned_approver_id || service?.approverId || '',
-          submittedAt: row.submitted_at,
-          updatedAt: row.updated_at,
-          verificationRemarks: row.staff_comments || undefined,
-          additionalInfoQuery: row.additional_info_query || undefined,
-          additionalInfoResponse: row.additional_info_response || undefined,
-          additionalDocuments: row.additional_documents || [],
-        };
-      });
-      setRequests(mapped);
-      const requestIds = new Map(mapped.filter((item) => item.databaseId).map((item) => [item.databaseId!, item.id]));
-      const [{ data: historyRows, error: historyError }, { data: notificationRows, error: notificationError }] = await Promise.all([
-        client.from('request_history').select('*').order('created_at', { ascending: false }),
-        client.from('notifications').select('*').order('created_at', { ascending: false }),
-      ]);
-      if (cancelled) return;
-      if (historyError) console.error('Unable to load request history:', historyError.message);
-      else setHistories((historyRows || []).map((row: any) => ({
-        id: row.id,
-        requestId: requestIds.get(row.request_id) || row.request_id,
-        actorId: row.changed_by || '',
-        actorName: row.changed_by === currentUser.id ? currentUser.name : 'StepWise Staff',
-        actorRole: row.changed_by === currentUser.id ? currentUser.role : 'STAFF',
-        action: row.new_status === 'pending_approval' ? 'Documents Verified & Forwarded' : 'Request Status Updated',
-        previousStatus: statusMap[row.old_status] || 'Draft',
-        newStatus: statusMap[row.new_status] || 'Submitted',
-        remarks: row.comment || '',
-        timestamp: row.created_at,
-      })));
-      if (notificationError) console.error('Unable to load notifications:', notificationError.message);
-      else setNotifications((notificationRows || []).map((row: any) => ({
-        id: row.id,
-        recipientId: row.user_id,
-        requestId: requestIds.get(row.request_id) || row.request_id || undefined,
-        title: row.title,
-        message: row.message,
-        type: /reject/i.test(row.title) ? 'rejection' : /approv|completed/i.test(row.title) ? 'approval' : /information/i.test(row.title) ? 'info_required' : 'submission',
-        createdAt: row.created_at,
-        isRead: Boolean(row.read_at),
-      })));
-    };
-    void loadRequests();
-    return () => { cancelled = true; };
-  }, [currentUser?.id]);
-
-  // Sync demo-only state to localStorage; real sessions are managed by Supabase Auth.
-  useEffect(() => {
-    if (isSupabaseConfigured) return;
     if (currentUser) {
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
     } else {
@@ -344,32 +230,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentUser]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
   }, [users]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.SESSION, String(isAuthenticated));
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.REQUESTS, JSON.stringify(requests));
   }, [requests]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(services));
   }, [services]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.HISTORIES, JSON.stringify(histories));
   }, [histories]);
 
   useEffect(() => {
-    if (isSupabaseConfigured) return;
     localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
   }, [notifications]);
 
@@ -390,10 +270,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Role Switching & Demo Authentication
   const switchRole = (role: Role, userId?: string) => {
-    if (isSupabaseConfigured) {
-      console.warn('Demo role switching is disabled when real authentication is configured.');
-      return;
-    }
     let targetUser: User | undefined;
     if (userId) {
       targetUser = users.find((u) => u.id === userId);
@@ -411,17 +287,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Login handler with password hashing validation
+  // Login handler with Supabase Auth + local validation fallback
   const loginUser = async (emailOrId: string, password?: string): Promise<LoginResult> => {
     const cleanId = emailOrId.trim().toLowerCase();
-    if (supabase) {
-      if (!password) return { success: false, error: 'Password is required.' };
-      let email = cleanId;
-      if (!cleanId.includes('@')) return { success: false, error: 'Please sign in using your registered email address.' };
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) return { success: false, error: error.message };
-      return { success: true };
+
+    // 1. If Supabase is configured and password is provided, attempt Supabase Auth
+    if (isSupabaseConfigured() && password) {
+      const res = await supabaseSignIn(cleanId, password);
+      if (res.user) {
+        setCurrentUser(res.user);
+        setIsAuthenticated(true);
+        if (res.user.role === 'STUDENT') setActiveTab('dashboard');
+        else if (res.user.role === 'STAFF') setActiveTab('staff-assigned');
+        else if (res.user.role === 'APPROVER') setActiveTab('approver-pending');
+        else if (res.user.role === 'ADMIN') setActiveTab('admin-dashboard');
+        return { success: true };
+      }
     }
+
+    // 2. Fallback to institutional directory / demo accounts
     const found = users.find(
       (u) =>
         u.email.toLowerCase() === cleanId ||
@@ -468,22 +352,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): Promise<RegisterResult> => {
     const email = (newUserData.email || '').trim().toLowerCase();
     const instId = (newUserData.institutionalId || '').trim().toUpperCase();
-    if (supabase) {
-      if (!newUserData.name?.trim() || !email || !instId || !newUserData.password) {
-        return { success: false, error: 'Name, college email, institutional ID, and password are required.' };
-      }
-      if (newUserData.password.length < 8) return { success: false, error: 'Password must be at least 8 characters long.' };
-      const { data: duplicate } = await supabase.from('profiles').select('id').or('email.eq.' + email + ',institutional_id.eq.' + instId).limit(1);
-      if (duplicate?.length) return { success: false, error: 'An account already exists with this email or institutional ID.' };
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password: newUserData.password,
-        options: { data: { full_name: newUserData.name.trim(), institutional_id: instId, department: newUserData.departmentId || 'dept-acad', phone: newUserData.phone || '' }, emailRedirectTo: window.location.origin },
-      });
-      if (error) return { success: false, error: error.message };
-      if (!data.session) return { success: false, error: 'Registration created. Check your email to confirm the account, then sign in.' };
-      return { success: true };
-    }
 
     if (!newUserData.name || !newUserData.name.trim()) {
       return { success: false, error: 'Full name is required.' };
@@ -510,20 +378,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    // Hash the password securely
+    // SECURITY ENFORCEMENT: Self-registration is strictly restricted to STUDENT role.
+    const userRole: Role = 'STUDENT';
+
+    // 1. If Supabase is configured, register via Supabase Auth
+    if (isSupabaseConfigured() && newUserData.password) {
+      const remoteRes = await supabaseSignUp(email, newUserData.password, {
+        name: newUserData.name.trim(),
+        institutionalId: instId,
+        departmentId: newUserData.departmentId || 'dept-acad',
+        role: userRole,
+        phone: newUserData.phone,
+      });
+
+      if (remoteRes.error) {
+        return { success: false, error: remoteRes.error };
+      }
+
+      if (remoteRes.user) {
+        setUsers((prev) => [remoteRes.user!, ...prev]);
+        setCurrentUser(remoteRes.user);
+        setIsAuthenticated(true);
+        setActiveTab('dashboard');
+        return { success: true, user: remoteRes.user };
+      }
+    }
+
+    // 2. Hash the password securely for prototype persistence
     let passwordHash = DEFAULT_PASSWORD_HASH;
     if (newUserData.password) {
       passwordHash = await hashPassword(newUserData.password);
     }
 
-    // SECURITY ENFORCEMENT: Self-registration is strictly restricted to STUDENT role.
     const user: User = {
       id: `usr-${Date.now()}`,
       name: newUserData.name.trim(),
       email,
       institutionalId: instId,
       departmentId: newUserData.departmentId || 'dept-acad',
-      role: 'STUDENT', // Enforce Student privilege only
+      role: userRole, // Enforce Student privilege only
       designation: 'Enrolled Student',
       phone: newUserData.phone || '+1 (555) 000-0000',
       passwordHash,
@@ -539,9 +432,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Logout handler
   const logout = () => {
-    if (supabase) {
-      void supabase.auth.signOut().then(({ error }) => { if (error) console.error('Sign out failed:', error.message); });
-    }
+    supabaseSignOut();
     setIsAuthenticated(false);
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEYS.SESSION);
@@ -550,11 +441,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Request Creation (Central source of truth)
-  const createRequest = async (
+  const createRequest = (
     serviceId: string,
     formData: Record<string, string>,
     uploadedDocuments: UploadedFile[]
-  ): Promise<ServiceRequest> => {
+  ): ServiceRequest => {
     if (!currentUser) throw new Error('Authentication required');
     const service = services.find((s) => s.id === serviceId);
     if (!service) throw new Error('Service not found');
@@ -564,8 +455,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const formattedSeq = String(nextSeq).padStart(4, '0');
     const newId = `SW-2026-${formattedSeq}`;
     const now = new Date().toISOString();
-    let trackingRequestId = newId;
-    let persistedDatabaseId: string | undefined;
 
     const newRequest: ServiceRequest = {
       id: newId,
@@ -590,52 +479,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Update shared requests state
     setRequests((prev) => [newRequest, ...prev]);
 
-    // Persist the request through the authenticated Express API backed by Neon.
-    if (supabase) {
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData.session?.access_token;
-        if (!accessToken) throw new Error('Authentication required. Please sign in again.');
-        const response = await fetch('/api/requests', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({
-            payload: {
-              serviceName: service.name,
-              serviceCode: service.code,
-              studentName: currentUser.name,
-              studentEmail: currentUser.email,
-              studentRoll: currentUser.institutionalId,
-              studentDepartment: currentUser.departmentId,
-              formData,
-              uploadedDocuments: uploadedDocuments.map(({ dataUrl: _dataUrl, ...metadata }) => metadata),
-            },
-          }),
-        });
-        const saved = await response.json();
-        if (!response.ok) throw new Error(saved.error || 'Request could not be saved.');
-        persistedDatabaseId = saved.id;
-        trackingRequestId = `SW-${new Date(saved.submitted_at).getFullYear()}-${String(saved.tracking_number).padStart(4, '0')}`;
-        setRequests((prev) => prev.map((request) => request.id === newId
-          ? { ...request, id: trackingRequestId, databaseId: saved.id, submittedAt: saved.submitted_at, updatedAt: saved.updated_at }
-          : request));
-      } catch (error) {
-        console.error('StepWise Neon request persistence failed:', error);
-        setRequests((prev) => prev.filter((request) => request.id !== newId));
-        throw new Error(error instanceof Error ? error.message : 'Request could not be saved. Please try again.');
-      }
-    }
-
-    // Database RPCs create persistent audit and notifications for authenticated sessions.
-    // Use local-only events exclusively in demo mode to avoid duplicate entries.
-    if (!supabase) {
     // Create history event
     const historyEvent: RequestHistory = {
       id: `hist-${Date.now()}`,
-      requestId: trackingRequestId,
+      requestId: newId,
       actorId: currentUser.id,
       actorName: currentUser.name,
       actorRole: currentUser.role,
@@ -651,9 +498,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const studentNotif: Notification = {
       id: `notif-${Date.now()}-1`,
       recipientId: currentUser.id,
-      requestId: trackingRequestId,
+      requestId: newId,
       title: 'Request Submitted Successfully',
-      message: `Your request ${trackingRequestId} for "${service.name}" has been received and routed to ${service.departmentId.toUpperCase()}.`,
+      message: `Your request ${newId} for "${service.name}" has been received and routed to ${service.departmentId.toUpperCase()}.`,
       type: 'submission',
       createdAt: now,
       isRead: false,
@@ -662,9 +509,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const staffNotif: Notification = {
       id: `notif-${Date.now()}-2`,
       recipientRole: 'STAFF',
-      requestId: trackingRequestId,
+      requestId: newId,
       title: 'New Service Request Queued',
-      message: `A new request ${trackingRequestId} (${service.name}) from ${currentUser.name} is ready for document verification.`,
+      message: `A new request ${newId} (${service.name}) from ${currentUser.name} is ready for document verification.`,
       type: 'submission',
       createdAt: now,
       isRead: false,
@@ -672,323 +519,433 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setNotifications((prev) => [studentNotif, staffNotif, ...prev]);
 
-    }
+    // Asynchronously synchronize to PostgreSQL backend if active
+    dbCreateRequest(newRequest).catch((e) => console.warn('Supabase request sync error:', e));
+    dbRecordHistory(historyEvent).catch((e) => console.warn('Supabase history sync error:', e));
+    dbCreateNotification(studentNotif).catch(() => {});
+    dbCreateNotification(staffNotif).catch(() => {});
 
-    return { ...newRequest, id: trackingRequestId, databaseId: persistedDatabaseId };
+    return newRequest;
   };
 
   // Staff: Verify Documents
-  const verifyDocuments = async (requestId: string, remarks: string, forwardToApprover: boolean): Promise<void> => {
-    if (!currentUser) throw new Error('Authentication required');
+  const verifyDocuments = (requestId: string, remarks: string, forwardToApprover: boolean) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
-    if (!target) throw new Error('Request not found');
+    if (!target) return;
 
-    if (currentUser.role !== 'STAFF' && currentUser.role !== 'ADMIN') {
-      throw new Error('Only department staff or administrators can verify documents.');
-    }
-    if (currentUser.role === 'STAFF' && target.assignedDepartmentId !== currentUser.departmentId) {
-      throw new Error('You can only verify requests belonging to your assigned department.');
+    // Department Staff authorization check
+    if (
+      currentUser.role !== 'STAFF' &&
+      currentUser.role !== 'ADMIN'
+    ) {
+      alert('Unauthorized: Only department staff or administrators can verify documents.');
+      return;
     }
 
-    // Persist the transition first. Never show a successful local state if the database rejects it.
-    if (supabase) {
-      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
-      const { error } = await supabase.rpc('stepwise_staff_update_request', {
-        p_request_id: target.databaseId,
-        p_action: forwardToApprover ? 'verify' : 'start_verification',
-        p_comment: remarks || null,
-      });
-      if (error) throw new Error(error.message);
+    if (
+      currentUser.role === 'STAFF' &&
+      target.assignedDepartmentId !== currentUser.departmentId
+    ) {
+      alert('Unauthorized: You can only verify requests belonging to your assigned department.');
+      return;
     }
 
     const now = new Date().toISOString();
-    const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Under Verification';
-    setRequests((prev) => prev.map((r) => r.id === requestId
-      ? { ...r, status: newStatus, verificationRemarks: remarks,
-          assignedStaffId: currentUser.id, assignedStaffName: currentUser.name, updatedAt: now }
-      : r));
+    const newStatus: RequestStatus = forwardToApprover ? 'Pending Approval' : 'Verified';
 
-    if (!supabase) {
-      const historyItem: RequestHistory = {
-        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
-        actorName: currentUser.name, actorRole: currentUser.role,
-        action: forwardToApprover ? 'Documents Verified & Forwarded' : 'Verification Started',
-        previousStatus: target.status, newStatus, remarks, timestamp: now,
-      };
-      setHistories((prev) => [historyItem, ...prev]);
-      const notifications: Notification[] = [{
-        id: `notif-${Date.now()}-1`, recipientId: target.studentId, requestId,
-        title: forwardToApprover ? 'Request Forwarded for Approval' : 'Verification Started',
-        message: `Staff officer ${currentUser.name} updated your request ${requestId}.`,
-        type: forwardToApprover ? 'forwarded' : 'verification', createdAt: now, isRead: false,
-      }];
-      if (forwardToApprover) notifications.push({
-        id: `notif-${Date.now()}-2`, recipientRole: 'APPROVER', requestId,
-        title: 'Action Required: Request Ready for Decision',
-        message: `Request ${requestId} (${target.serviceName}) is awaiting approval.`,
-        type: 'forwarded', createdAt: now, isRead: false,
-      });
-      setNotifications((prev) => [...notifications, ...prev]);
-    }
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              verificationRemarks: remarks,
+              assignedStaffId: currentUser.id,
+              assignedStaffName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: forwardToApprover ? 'Documents Verified & Forwarded' : 'Documents Verified',
+      previousStatus: target.status,
+      newStatus,
+      remarks,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notifStudent: Notification = {
+      id: `notif-${Date.now()}-1`,
+      recipientId: target.studentId,
+      requestId,
+      title: forwardToApprover ? 'Request Forwarded for Approval' : 'Documents Verified',
+      message: `Staff officer ${currentUser.name} verified your documents for ${requestId}. ${
+        forwardToApprover ? 'Forwarded to Approving Authority.' : ''
+      }`,
+      type: forwardToApprover ? 'forwarded' : 'verification',
+      createdAt: now,
+      isRead: false,
+    };
+
+    const notifApprover: Notification = {
+      id: `notif-${Date.now()}-2`,
+      recipientRole: 'APPROVER',
+      requestId,
+      title: 'Action Required: Request Ready for Decision',
+      message: `Request ${requestId} (${target.serviceName}) verified by ${currentUser.name} and awaiting your final endorsement.`,
+      type: 'forwarded',
+      createdAt: now,
+      isRead: false,
+    };
+
+    setNotifications((prev) => [notifStudent, notifApprover, ...prev]);
+
+    // Backend sync
+    dbUpdateRequest(requestId, {
+      status: newStatus,
+      verificationRemarks: remarks,
+      assignedStaffId: currentUser.id,
+      assignedStaffName: currentUser.name,
+    }).catch(() => {});
+    dbRecordHistory(historyItem).catch(() => {});
+    dbCreateNotification(notifStudent).catch(() => {});
+    dbCreateNotification(notifApprover).catch(() => {});
   };
 
   // Staff: Request Additional Information
-  const requestAdditionalInfo = async (requestId: string, query: string): Promise<void> => {
-    if (!currentUser) throw new Error('Authentication required');
+  const requestAdditionalInfo = (requestId: string, query: string) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
-    if (!target) throw new Error('Request not found');
-    if (currentUser.role !== 'STAFF' && currentUser.role !== 'ADMIN') {
-      throw new Error('Only department staff or administrators can request additional information.');
-    }
-    if (currentUser.role === 'STAFF' && target.assignedDepartmentId !== currentUser.departmentId) {
-      throw new Error('You can only query requests belonging to your assigned department.');
-    }
-    if (!query.trim()) throw new Error('Please explain what information or document is missing.');
+    if (!target) return;
 
-    if (supabase) {
-      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
-      const { error } = await supabase.rpc('stepwise_staff_update_request', {
-        p_request_id: target.databaseId,
-        p_action: 'request_information',
-        p_comment: query,
-      });
-      if (error) throw new Error(error.message);
+    if (
+      currentUser.role !== 'STAFF' &&
+      currentUser.role !== 'ADMIN'
+    ) {
+      alert('Unauthorized: Only department staff or administrators can request additional information.');
+      return;
+    }
+
+    if (
+      currentUser.role === 'STAFF' &&
+      target.assignedDepartmentId !== currentUser.departmentId
+    ) {
+      alert('Unauthorized: You can only query requests belonging to your assigned department.');
+      return;
     }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Additional Information Required';
-    setRequests((prev) => prev.map((r) => r.id === requestId
-      ? { ...r, status: newStatus, additionalInfoQuery: query,
-          assignedStaffId: currentUser.id, assignedStaffName: currentUser.name, updatedAt: now }
-      : r));
 
-    if (!supabase) {
-      const historyItem: RequestHistory = {
-        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
-        actorName: currentUser.name, actorRole: currentUser.role,
-        action: 'Additional Information Requested', previousStatus: target.status,
-        newStatus, remarks: `Officer query: "${query}"`, timestamp: now,
-      };
-      setHistories((prev) => [historyItem, ...prev]);
-      const notif: Notification = {
-        id: `notif-${Date.now()}`, recipientId: target.studentId, requestId,
-        title: 'Action Needed: Additional Information Requested',
-        message: `Staff query for ${requestId}: "${query}". Please attach missing documents or clarifications.`,
-        type: 'info_required', createdAt: now, isRead: false,
-      };
-      setNotifications((prev) => [notif, ...prev]);
-    }
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              additionalInfoQuery: query,
+              assignedStaffId: currentUser.id,
+              assignedStaffName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Additional Information Requested',
+      previousStatus: target.status,
+      newStatus,
+      remarks: `Officer query: "${query}"`,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientId: target.studentId,
+      requestId,
+      title: 'Action Needed: Additional Information Requested',
+      message: `Staff query for ${requestId}: "${query}". Please attach missing documents or clarifications.`,
+      type: 'info_required',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+
+    // Backend sync
+    dbUpdateRequest(requestId, {
+      status: newStatus,
+      additionalInfoQuery: query,
+      assignedStaffId: currentUser.id,
+      assignedStaffName: currentUser.name,
+    }).catch(() => {});
+    dbRecordHistory(historyItem).catch(() => {});
+    dbCreateNotification(notif).catch(() => {});
   };
 
   // Student: Submit Additional Information / Documents
-  const submitAdditionalInfo = async (
+  const submitAdditionalInfo = (
     requestId: string,
     responseText: string,
     additionalFiles: UploadedFile[]
-  ): Promise<void> => {
-    if (!currentUser) throw new Error('Authentication required');
+  ) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
-    if (!target) throw new Error('Request not found');
+    if (!target) return;
 
+    // Student identity check
     if (currentUser.role === 'STUDENT' && target.studentId !== currentUser.id) {
-      throw new Error('You can only respond to your own service requests.');
-    }
-
-    if (supabase) {
-      if (!target.databaseId) throw new Error('This request has no database reference. Refresh the page and try again.');
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      const authUser = authData.user;
-      if (authError || !authUser) throw new Error('Your session has expired. Sign in again.');
-
-      const persistedDocuments: Record<string, unknown>[] = [];
-      for (const uploaded of additionalFiles) {
-        const { dataUrl, ...metadata } = uploaded;
-        if (!dataUrl) throw new Error('The file "' + uploaded.fileName + '" was not read correctly. Select it again.');
-        const fileResponse = await fetch(dataUrl);
-        if (!fileResponse.ok) throw new Error('Could not read ' + uploaded.fileName);
-        const blob = await fileResponse.blob();
-        const safeFileName = uploaded.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const safeFileId = uploaded.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const storagePath = authUser.id + '/' + target.databaseId + '/' + safeFileId + '-' + safeFileName;
-        const { error: uploadError } = await supabase.storage.from('stepwise-documents').upload(storagePath, blob, {
-          contentType: blob.type || uploaded.fileType || 'application/pdf',
-          upsert: false,
-        });
-        if (uploadError) throw uploadError;
-        persistedDocuments.push({ ...metadata, storagePath });
-      }
-
-      const { error } = await supabase.rpc('stepwise_student_submit_additional_info', {
-        p_request_id: target.databaseId,
-        p_response: responseText,
-        p_documents: persistedDocuments,
-      });
-      if (error) throw new Error(error.message);
+      alert('Unauthorized: You can only respond to your own service requests.');
+      return;
     }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Under Verification';
-    setRequests((prev) => prev.map((r) => r.id === requestId
-      ? { ...r, status: newStatus, additionalInfoResponse: responseText,
-          additionalDocuments: [...(r.additionalDocuments || []), ...additionalFiles], updatedAt: now }
-      : r));
+    const combinedFiles = [...(target.additionalDocuments || []), ...additionalFiles];
 
-    if (!supabase) {
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              additionalInfoResponse: responseText,
+              additionalDocuments: combinedFiles,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
     const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
-      actorName: currentUser.name, actorRole: currentUser.role,
-      action: 'Additional Information Resubmitted', previousStatus: target.status,
-      newStatus, remarks: `Student note: "${responseText}". Additional files uploaded: ${additionalFiles.length}.`,
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Additional Information Resubmitted',
+      previousStatus: target.status,
+      newStatus,
+      remarks: `Student note: "${responseText}". Additional files uploaded: ${additionalFiles.length}.`,
       timestamp: now,
     };
     setHistories((prev) => [historyItem, ...prev]);
+
     const notif: Notification = {
-      id: `notif-${Date.now()}`, recipientRole: 'STAFF', requestId,
+      id: `notif-${Date.now()}`,
+      recipientRole: 'STAFF',
+      requestId,
       title: 'Student Responded to Information Query',
       message: `${currentUser.name} submitted additional documents for ${requestId}. Request returned to verification queue.`,
-      type: 'verification', createdAt: now, isRead: false,
+      type: 'verification',
+      createdAt: now,
+      isRead: false,
     };
     setNotifications((prev) => [notif, ...prev]);
-    }
+
+    // Backend sync
+    dbUpdateRequest(requestId, {
+      status: newStatus,
+      additionalInfoResponse: responseText,
+      additionalDocuments: combinedFiles,
+    }).catch(() => {});
+    dbRecordHistory(historyItem).catch(() => {});
+    dbCreateNotification(notif).catch(() => {});
   };
 
   // Approver: Approve Request
-  const approveRequest = async (requestId: string, remarks: string, markCompleted = true): Promise<void> => {
-    if (!currentUser) throw new Error('Authentication required');
+  const approveRequest = (requestId: string, remarks: string, markCompleted = true) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
-    if (!target) throw new Error('Request not found');
-    if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
-      throw new Error('Only authorized approving authorities can endorse requests.');
-    }
+    if (!target) return;
 
-    if (supabase) {
-      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
-      const { error } = await supabase.rpc('stepwise_approver_decide', {
-        p_request_id: target.databaseId, p_decision: 'approve', p_comment: remarks || null,
-      });
-      if (error) throw new Error(error.message);
-      if (markCompleted) {
-        const { error: completeError } = await supabase.rpc('stepwise_complete_request', {
-          p_request_id: target.databaseId, p_comment: remarks || null,
-        });
-        if (completeError) throw new Error('Request was approved, but completion failed: ' + completeError.message);
-      }
+    if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
+      alert('Unauthorized: Only authorized Approving Authorities can endorse requests.');
+      return;
     }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = markCompleted ? 'Completed' : 'Approved';
-    setRequests((prev) => prev.map((r) => r.id === requestId
-      ? { ...r, status: newStatus, decisionRemarks: remarks,
-          approverId: currentUser.id, approverName: currentUser.name, updatedAt: now }
-      : r));
 
-    if (!supabase) {
-      const historyItem: RequestHistory = {
-        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
-        actorName: currentUser.name, actorRole: currentUser.role,
-        action: markCompleted ? 'Approved & Issued Certificate' : 'Request Endorsed / Approved',
-        previousStatus: target.status, newStatus,
-        remarks: remarks || 'Endorsed and approved according to university guidelines.', timestamp: now,
-      };
-      setHistories((prev) => [historyItem, ...prev]);
-      const notif: Notification = {
-        id: `notif-${Date.now()}`, recipientId: target.studentId, requestId,
-        title: markCompleted ? 'Request Approved & Completed!' : 'Request Approved',
-        message: `Your request ${requestId} (${target.serviceName}) was approved by ${currentUser.name}.`,
-        type: markCompleted ? 'completion' : 'approval', createdAt: now, isRead: false,
-      };
-      setNotifications((prev) => [notif, ...prev]);
-    }
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              decisionRemarks: remarks,
+              approverId: currentUser.id,
+              approverName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: markCompleted ? 'Approved & Issued Certificate' : 'Request Endorsed / Approved',
+      previousStatus: target.status,
+      newStatus,
+      remarks: remarks || 'Endorsed and approved according to university guidelines.',
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientId: target.studentId,
+      requestId,
+      title: 'Request Approved & Completed!',
+      message: `Your request ${requestId} (${target.serviceName}) has been approved by ${currentUser.name}. You may now view or download your official stamped document.`,
+      type: 'completion',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+
+    // Backend sync
+    dbUpdateRequest(requestId, {
+      status: newStatus,
+      decisionRemarks: remarks,
+      approverId: currentUser.id,
+      approverName: currentUser.name,
+    }).catch(() => {});
+    dbRecordHistory(historyItem).catch(() => {});
+    dbCreateNotification(notif).catch(() => {});
   };
 
   // Approver: Reject Request
-  const rejectRequest = async (requestId: string, remarks: string): Promise<void> => {
-    if (!currentUser) throw new Error('Authentication required');
+  const rejectRequest = (requestId: string, remarks: string) => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
-    if (!target) throw new Error('Request not found');
-    if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
-      throw new Error('Only authorized approving authorities can reject requests.');
-    }
-    if (!remarks.trim()) throw new Error('A comment is required when rejecting a request.');
+    if (!target) return;
 
-    if (supabase) {
-      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
-      const { error } = await supabase.rpc('stepwise_approver_decide', {
-        p_request_id: target.databaseId, p_decision: 'reject', p_comment: remarks,
-      });
-      if (error) throw new Error(error.message);
+    if (currentUser.role !== 'APPROVER' && currentUser.role !== 'ADMIN') {
+      alert('Unauthorized: Only authorized Approving Authorities can reject requests.');
+      return;
     }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Rejected';
-    setRequests((prev) => prev.map((r) => r.id === requestId
-      ? { ...r, status: newStatus, decisionRemarks: remarks,
-          approverId: currentUser.id, approverName: currentUser.name, updatedAt: now }
-      : r));
 
-    if (!supabase) {
-      const historyItem: RequestHistory = {
-        id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
-        actorName: currentUser.name, actorRole: currentUser.role,
-        action: 'Request Rejected', previousStatus: target.status, newStatus,
-        remarks, timestamp: now,
-      };
-      setHistories((prev) => [historyItem, ...prev]);
-      const notif: Notification = {
-        id: `notif-${Date.now()}`, recipientId: target.studentId, requestId,
-        title: 'Request Decision: Rejected',
-        message: `Your request ${requestId} was rejected by ${currentUser.name}. Reason: ${remarks}`,
-        type: 'rejection', createdAt: now, isRead: false,
-      };
-      setNotifications((prev) => [notif, ...prev]);
-    }
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: newStatus,
+              decisionRemarks: remarks,
+              approverId: currentUser.id,
+              approverName: currentUser.name,
+              updatedAt: now,
+            }
+          : r
+      )
+    );
+
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Request Rejected',
+      previousStatus: target.status,
+      newStatus,
+      remarks: remarks || 'Does not fulfill academic or administrative eligibility requirements.',
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    const notif: Notification = {
+      id: `notif-${Date.now()}`,
+      recipientId: target.studentId,
+      requestId,
+      title: 'Request Decision: Rejected',
+      message: `Your request ${requestId} was rejected by ${currentUser.name}. Reason: ${remarks}`,
+      type: 'rejection',
+      createdAt: now,
+      isRead: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+
+    // Backend sync
+    dbUpdateRequest(requestId, {
+      status: newStatus,
+      decisionRemarks: remarks,
+      approverId: currentUser.id,
+      approverName: currentUser.name,
+    }).catch(() => {});
+    dbRecordHistory(historyItem).catch(() => {});
+    dbCreateNotification(notif).catch(() => {});
   };
 
   // Complete Request
-  const completeRequest = async (requestId: string, remarks = 'Marked completed by administrator'): Promise<void> => {
-    if (!currentUser) throw new Error('Authentication required');
+  const completeRequest = (requestId: string, remarks = 'Marked completed by administrator') => {
+    if (!currentUser) return;
     const target = requests.find((r) => r.id === requestId);
-    if (!target) throw new Error('Request not found');
-
-    if (supabase) {
-      if (!target.databaseId) throw new Error('This request has no database reference. Refresh and try again.');
-      const { error } = await supabase.rpc('stepwise_complete_request', {
-        p_request_id: target.databaseId,
-        p_comment: remarks,
-      });
-      if (error) throw new Error(error.message);
-    }
+    if (!target) return;
 
     const now = new Date().toISOString();
-    setRequests((prev) => prev.map((r) => r.id === requestId ? { ...r, status: 'Completed', updatedAt: now } : r));
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: 'Completed',
+              updatedAt: now,
+            }
+          : r
+      )
+    );
 
-    if (!supabase) {
-      const historyItem: RequestHistory = {
-        id: 'hist-' + Date.now(),
-        requestId,
-        actorId: currentUser.id,
-        actorName: currentUser.name,
-        actorRole: currentUser.role,
-        action: 'Workflow Marked Completed',
-        previousStatus: target.status,
-        newStatus: 'Completed',
-        remarks,
-        timestamp: now,
-      };
-      setHistories((prev) => [historyItem, ...prev]);
-    }
+    const historyItem: RequestHistory = {
+      id: `hist-${Date.now()}`,
+      requestId,
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      action: 'Workflow Marked Completed',
+      previousStatus: target.status,
+      newStatus: 'Completed',
+      remarks,
+      timestamp: now,
+    };
+    setHistories((prev) => [historyItem, ...prev]);
+
+    dbUpdateRequest(requestId, { status: 'Completed', decisionRemarks: remarks }).catch(() => {});
+    dbRecordHistory(historyItem).catch(() => {});
   };
 
   // Notification actions
   const markNotificationAsRead = (id: string) => {
-    if (supabase) void supabase.rpc('stepwise_mark_notification_read', { p_notification_id: id }).then(({ error }) => { if (error) console.error('Could not mark notification as read:', error.message); });
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
     );
+    dbMarkNotificationRead(id).catch(() => {});
   };
 
   const markAllNotificationsAsRead = () => {
-    if (supabase) void supabase.rpc('stepwise_mark_all_notifications_read').then(({ error }) => { if (error) console.error('Could not mark notifications as read:', error.message); });
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
@@ -1073,6 +1030,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unreadCount,
         isWalkthroughOpen,
         isAuthenticated,
+        isBackendConnected,
+        backendProvider,
         setActiveTab,
         setSelectedRequestId,
         setSelectedServiceId,

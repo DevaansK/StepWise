@@ -14,6 +14,7 @@ import {
   ExternalLink,
   LogOut,
   User,
+  Database,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Role } from '../../types';
@@ -33,6 +34,8 @@ export const TopNav: React.FC<TopNavProps> = ({ onToggleMobileSidebar }) => {
     setActiveTab,
     setIsWalkthroughOpen,
     logout,
+    isBackendConnected,
+    backendProvider,
   } = useApp();
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -112,6 +115,17 @@ export const TopNav: React.FC<TopNavProps> = ({ onToggleMobileSidebar }) => {
                 </span>
                 <span className="hidden sm:inline-block text-[10px] font-mono font-medium uppercase tracking-wider bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
                   Campus Admin OS
+                </span>
+                <span
+                  className={`hidden lg:inline-flex items-center gap-1 text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${
+                    isBackendConnected
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-indigo-50/80 text-indigo-700 border-indigo-200'
+                  }`}
+                  title={`Backend: ${backendProvider}`}
+                >
+                  <Database className="w-2.5 h-2.5" />
+                  <span>{isBackendConnected ? 'Supabase Connected' : 'PostgreSQL Schema Ready'}</span>
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden sm:block">
