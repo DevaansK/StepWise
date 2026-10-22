@@ -1050,12 +1050,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Notification actions
   const markNotificationAsRead = (id: string) => {
+    if (supabase) void supabase.rpc('stepwise_mark_notification_read', { p_notification_id: id }).then(({ error }) => { if (error) console.error('Could not mark notification as read:', error.message); });
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
     );
   };
 
   const markAllNotificationsAsRead = () => {
+    if (supabase) void supabase.rpc('stepwise_mark_all_notifications_read').then(({ error }) => { if (error) console.error('Could not mark notifications as read:', error.message); });
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
