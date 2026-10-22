@@ -282,6 +282,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           submittedAt: row.submitted_at,
           updatedAt: row.updated_at,
           verificationRemarks: row.staff_comments || undefined,
+          additionalInfoQuery: row.additional_info_query || undefined,
+          additionalInfoResponse: row.additional_info_response || undefined,
+          additionalDocuments: row.additional_documents || [],
         };
       });
       setRequests(mapped);
