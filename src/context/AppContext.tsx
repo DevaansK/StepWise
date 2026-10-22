@@ -71,7 +71,7 @@ interface AppContextType {
     requestId: string,
     responseText: string,
     additionalFiles: UploadedFile[]
-  ) => void;
+  ) => Promise<void>;
   approveRequest: (requestId: string, remarks: string, markCompleted?: boolean) => void;
   rejectRequest: (requestId: string, remarks: string) => void;
   completeRequest: (requestId: string, remarks?: string) => void;
@@ -876,75 +876,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Student: Submit Additional Information / Documents
-  const submitAdditionalInfo = (
+  const submitAdditionalInfo = async (
     requestId: string,
     responseText: string,
     additionalFiles: UploadedFile[]
-  ) => {
-    if (!currentUser) return;
+  ): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required');
     const target = requests.find((r) => r.id === requestId);
-    if (!target) return;
+    if (!target) throw new Error('Request not found');
 
-    // Student identity check
     if (currentUser.role === 'STUDENT' && target.studentId !== currentUser.id) {
-      alert('Unauthorized: You can only respond to your own service requests.');
-      return;
+      throw new Error('You can only respond to your own service requests.');
     }
 
-    if (supabase && target.databaseId) {
-      const safeDocuments = additionalFiles.map(({ dataUrl: _dataUrl, ...doc }) => doc);
-      void supabase.rpc('stepwise_student_submit_additional_info', {
+    if (supabase) {
+      if (!target.databaseId) throw new Error('This request has no database reference. Refresh the page and try again.');
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      const authUser = authData.user;
+      if (authError || !authUser) throw new Error('Your session has expired. Sign in again.');
+
+      const persistedDocuments: Record<string, unknown>[] = [];
+      for (const uploaded of additionalFiles) {
+        const { dataUrl, ...metadata } = uploaded;
+        if (!dataUrl) throw new Error('The file "' + uploaded.fileName + '" was not read correctly. Select it again.');
+        const fileResponse = await fetch(dataUrl);
+        if (!fileResponse.ok) throw new Error('Could not read ' + uploaded.fileName);
+        const blob = await fileResponse.blob();
+        const safeFileName = uploaded.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const safeFileId = uploaded.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const storagePath = authUser.id + '/' + target.databaseId + '/' + safeFileId + '-' + safeFileName;
+        const { error: uploadError } = await supabase.storage.from('stepwise-documents').upload(storagePath, blob, {
+          contentType: blob.type || uploaded.fileType || 'application/pdf',
+          upsert: false,
+        });
+        if (uploadError) throw uploadError;
+        persistedDocuments.push({ ...metadata, storagePath });
+      }
+
+      const { error } = await supabase.rpc('stepwise_student_submit_additional_info', {
         p_request_id: target.databaseId,
         p_response: responseText,
-        p_documents: safeDocuments,
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Server-side additional information submission failed:', error.message);
-          window.alert('The server could not save your response. Refresh the request and try again.');
-        }
+        p_documents: persistedDocuments,
       });
+      if (error) throw new Error(error.message);
     }
 
     const now = new Date().toISOString();
     const newStatus: RequestStatus = 'Under Verification';
-
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              status: newStatus,
-              additionalInfoResponse: responseText,
-              additionalDocuments: [...(r.additionalDocuments || []), ...additionalFiles],
-              updatedAt: now,
-            }
-          : r
-      )
-    );
+    setRequests((prev) => prev.map((r) => r.id === requestId
+      ? { ...r, status: newStatus, additionalInfoResponse: responseText,
+          additionalDocuments: [...(r.additionalDocuments || []), ...additionalFiles], updatedAt: now }
+      : r));
 
     const historyItem: RequestHistory = {
-      id: `hist-${Date.now()}`,
-      requestId,
-      actorId: currentUser.id,
-      actorName: currentUser.name,
-      actorRole: currentUser.role,
-      action: 'Additional Information Resubmitted',
-      previousStatus: target.status,
-      newStatus,
-      remarks: `Student note: "${responseText}". Additional files uploaded: ${additionalFiles.length}.`,
+      id: `hist-${Date.now()}`, requestId, actorId: currentUser.id,
+      actorName: currentUser.name, actorRole: currentUser.role,
+      action: 'Additional Information Resubmitted', previousStatus: target.status,
+      newStatus, remarks: `Student note: "${responseText}". Additional files uploaded: ${additionalFiles.length}.`,
       timestamp: now,
     };
     setHistories((prev) => [historyItem, ...prev]);
-
     const notif: Notification = {
-      id: `notif-${Date.now()}`,
-      recipientRole: 'STAFF',
-      requestId,
+      id: `notif-${Date.now()}`, recipientRole: 'STAFF', requestId,
       title: 'Student Responded to Information Query',
       message: `${currentUser.name} submitted additional documents for ${requestId}. Request returned to verification queue.`,
-      type: 'verification',
-      createdAt: now,
-      isRead: false,
+      type: 'verification', createdAt: now, isRead: false,
     };
     setNotifications((prev) => [notif, ...prev]);
   };
