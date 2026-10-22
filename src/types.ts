@@ -90,7 +90,9 @@ export interface UploadedFile {
 }
 
 export interface ServiceRequest {
-  id: string; // e.g. "SW-2026-0001"
+  id: string;
+  /** Supabase UUID used for server-side workflow actions. */
+  databaseId?: string; // e.g. "SW-2026-0001"
   studentId: string;
   studentName: string;
   studentEmail: string;
