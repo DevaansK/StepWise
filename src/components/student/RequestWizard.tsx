@@ -159,11 +159,11 @@ export const RequestWizard: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const created = createRequest(selectedService.id, formData, uploadedFiles);
+      const created = await createRequest(selectedService.id, formData, uploadedFiles);
       setSubmittedRequest(created);
     } catch (err) {
       console.error(err);
-      alert('Error creating request. Please try again.');
+      alert(err instanceof Error ? err.message : 'The request could not be saved. Please check My Requests before trying again.');
     } finally {
       setIsSubmitting(false);
     }
