@@ -94,34 +94,58 @@ export const RequestWizard: React.FC = () => {
     return Object.keys(errors).length === 0;
   };
 
-  // Simulated file upload
-  const handleFileUpload = (docId: string, docName: string, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // Read the actual file so the submission flow can upload bytes to private Supabase Storage.
+  const handleFileUpload = async (docId: string, docName: string, event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
 
-    const newUploaded: UploadedFile = {
-      id: `up-${Date.now()}`,
-      docId,
-      docName,
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type || 'application/pdf',
-      uploadedAt: new Date().toISOString(),
-      previewType: file.type.includes('image') ? 'image' : 'pdf',
-    };
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!allowedTypes.includes(file.type)) {
+      setFormErrors((prev) => ({ ...prev, [docId]: 'Upload a PDF, JPEG, or PNG file.' }));
+      input.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setFormErrors((prev) => ({ ...prev, [docId]: 'File must be 10 MB or smaller.' }));
+      input.value = '';
+      return;
+    }
 
-    setUploadedFiles((prev) => {
-      // replace if already exists for this docId or append
-      const filtered = prev.filter((f) => f.docId !== docId);
-      return [...filtered, newUploaded];
-    });
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === 'string'
+          ? resolve(reader.result)
+          : reject(new Error('Could not read file'));
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
 
-    // Clear error for this doc
-    setFormErrors((prev) => {
-      const copy = { ...prev };
-      delete copy[docId];
-      return copy;
-    });
+      const newUploaded: UploadedFile = {
+        id: `up-${Date.now()}`,
+        docId,
+        docName,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        uploadedAt: new Date().toISOString(),
+        previewType: file.type.startsWith('image/') ? 'image' : 'pdf',
+        dataUrl,
+      };
+
+      setUploadedFiles((prev) => [...prev.filter((uploaded) => uploaded.docId !== docId), newUploaded]);
+      setFormErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[docId];
+        return copy;
+      });
+    } catch (error) {
+      console.error('Could not read selected document:', error);
+      setFormErrors((prev) => ({ ...prev, [docId]: 'Could not read this file. Please choose it again.' }));
+    } finally {
+      input.value = '';
+    }
   };
 
   // Remove uploaded file
